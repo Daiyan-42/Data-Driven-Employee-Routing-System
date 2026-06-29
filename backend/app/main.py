@@ -1,42 +1,29 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1.routes.auth import router as auth_router
-from app.api.v1.routes.admin import router as admin_router
-from app.api.v1.routes.drivers import router as drivers_router
-from app.api.v1.routes.employees import router as employees_router
-from app.api.v1.routes.pickup_requests import router as pickup_requests_router
-from app.api.v1.routes.users import router as users_router
-from app.api.v1.routes.vehicles import router as vehicles_router
+from app.routers import auth, drivers, vehicles, pickup_requests, dropoff_requests
 
-app=FastAPI(title="Data-Driven Employee Routing System")
+app = FastAPI(
+    title="Employee Routing System — Backend",
+    version="1.0.0",
+    description="Admin manages drivers, vehicles and request approvals"
+)
 
+# Allow frontend dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(admin_router)
-app.include_router(employees_router)
-app.include_router(drivers_router)
-app.include_router(vehicles_router)
-app.include_router(pickup_requests_router)
+# Routers
+app.include_router(auth.router)
+app.include_router(drivers.router)
+app.include_router(vehicles.router)
+app.include_router(pickup_requests.router)
+app.include_router(dropoff_requests.router)
 
-
-@app.get("/")
-def root():
-    return {"message": "Welcome to Data-Driven Employee Routing System"}
-
-
-@app.get("/health")
-def health_check():
+@app.get("/", tags=["Health"])
+def health():
     return {"status": "ok"}
