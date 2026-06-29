@@ -20,12 +20,12 @@ class DriverService:
             self.db.table("driver")
             .select("driver_id, user_id, license_no, status, users(name, email, phone, status)")
             .eq("driver_id", driver_id)
-            .single()
+            .limit(1)
             .execute()
         )
         if not res.data:
             raise HTTPException(status_code=404, detail="Driver not found")
-        return self._flatten(res.data)
+        return self._flatten(res.data[0])
 
     def create(self, data: DriverCreate):
         # 1. Check email uniqueness
@@ -114,7 +114,7 @@ class DriverService:
 
     def _flatten(self, row: dict) -> dict:
         """Merge nested users dict into flat response."""
-        user = row.pop("users", {}) or {}
+        user = row.get("users", {}) or {}
         return {
             "driver_id": row["driver_id"],
             "user_id": row["user_id"],

@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date, time
+from datetime import date
+from app.models.common import Pagination
 
 class PickupRequestResponse(BaseModel):
     pickup_id: int
@@ -30,6 +31,10 @@ class DropoffRequestResponse(BaseModel):
     status: str
     drop_time: Optional[str]
     created_at: Optional[str]
+
+class DropoffRequestsListResponse(BaseModel):
+    dropoff_requests: list[DropoffRequestResponse]
+    pagination: Pagination
 
 class ApprovalRequest(BaseModel):
     reason: Optional[str] = None    # optional rejection reason

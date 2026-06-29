@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from jose import jwt
 from datetime import datetime, timedelta
-from app.models.auth import LoginRequest, TokenResponse
+from app.models.auth import LoginRequest, LoginResponse
 from app.database import supabase
 from app.config import settings
 
@@ -17,14 +17,14 @@ def _create_token(user_id: int, role: str, name: str) -> str:
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 def login(body: LoginRequest):
     # Fetch user by email
     res = (
         supabase.table("users")
-        .select("user_id, name, email, password_hash, role, status")
+        .select("user_id, name, email, phone, password_hash, role, status")
         .eq("email", body.email)
-        .single()
+        .limit(1)
         .execute()
     )
 
@@ -34,7 +34,7 @@ def login(body: LoginRequest):
             detail="Invalid email or password"
         )
 
-    user = res.data
+    user = res.data[0]
 
     # Check account status
     if user.get("status") != "Active":
@@ -52,9 +52,18 @@ def login(body: LoginRequest):
 
     token = _create_token(user["user_id"], user["role"], user["name"])
 
-    return TokenResponse(
-        access_token=token,
-        role=user["role"],
-        name=user["name"],
-        user_id=user["user_id"]
-    )
+    return {
+        "user": {
+            "user_id": user["user_id"],
+            "name": user["name"],
+            "email": user["email"],
+            "phone": user.get("phone"),
+            "role": user["role"],
+            "status": user["status"],
+        },
+        "tokens": {
+            "access_token": token,
+            "refresh_token": None,
+            "token_type": "bearer",
+        },
+    }

@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from app.models.common import Pagination
 
 class VehicleCreate(BaseModel):
     plate_no: str
@@ -27,3 +28,7 @@ class VehicleResponse(BaseModel):
     driver_id: Optional[int]
     driver_name: Optional[str] = None   # joined from users
     license_no: Optional[str] = None    # joined from driver
+
+class VehiclesListResponse(BaseModel):
+    vehicles: list[VehicleResponse]
+    pagination: Pagination

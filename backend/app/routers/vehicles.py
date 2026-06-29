@@ -1,21 +1,24 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.database import supabase
-from app.models.vehicle import VehicleCreate, VehicleUpdate, VehicleResponse
+from app.models.common import paginate
+from app.models.vehicle import VehicleCreate, VehicleUpdate, VehicleResponse, VehiclesListResponse
 from app.services.vehicle_service import VehicleService
 from app.dependencies import require_admin, TokenData
-from typing import List
 
 router = APIRouter(prefix="/vehicles", tags=["Admin — Vehicles"])
 
 def _svc() -> VehicleService:
     return VehicleService(supabase)
 
-@router.get("/", response_model=List[VehicleResponse])
+@router.get("/", response_model=VehiclesListResponse)
 def list_vehicles(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=500),
     _: TokenData = Depends(require_admin),
     svc: VehicleService = Depends(_svc)
 ):
-    return svc.get_all()
+    vehicles, pagination = paginate(svc.get_all(), page, limit)
+    return {"vehicles": vehicles, "pagination": pagination}
 
 @router.get("/{vehicle_id}", response_model=VehicleResponse)
 def get_vehicle(

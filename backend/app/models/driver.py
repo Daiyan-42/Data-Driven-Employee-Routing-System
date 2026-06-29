@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from app.models.common import Pagination
 
 class DriverCreate(BaseModel):
     # User fields
@@ -26,3 +27,7 @@ class DriverResponse(BaseModel):
     license_no: str
     status: str
     user_status: Optional[str]
+
+class DriversListResponse(BaseModel):
+    drivers: list[DriverResponse]
+    pagination: Pagination
