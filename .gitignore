@@ -1,18 +1,10 @@
 *.pdf
 .DS_Store
 backend/myenv/
-backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
 backend/.env
-backend/app/core/__pycache__/
-backend/app/db/__pycache__/
-backend/app/schemas/__pycache__/
-backend/app/__pycache__/
-backend/app/api/v1/routes/__pycache__/
-backend/app/repositories/__pycache__/
-backend/app/services/__pycache__/
-backend/app/services/__pycache__/
 
-backend/app/__pycache__/main.cpython-312.pyc
 
 # Node modules
 node_modules/
@@ -49,3 +41,7 @@ api_doc.yaml
 
 backend/cache/
 backend/.venv/lib64
+backend/app/models/__pycache__/__init__.cpython-312.pyc
+backend/app/models/__pycache__/auth.cpython-312.pyc
+backend/app/routers/__pycache__/__init__.cpython-312.pyc
+backend/app/routers/__pycache__/auth.cpython-312.pyc
