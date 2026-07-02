@@ -1,7 +1,21 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
+from datetime import date, time
 from app.models.common import Pagination
+
+class PickupRequestCreate(BaseModel):
+    zone_id: Optional[int] = None
+    pickup_lat: float
+    pickup_lng: float
+    shift_start_time: time
+    service_date: date
+
+class PickupRequestUpdate(BaseModel):
+    zone_id: Optional[int] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
+    shift_start_time: Optional[time] = None
+    service_date: Optional[date] = None
 
 class PickupRequestResponse(BaseModel):
     pickup_id: int
@@ -17,6 +31,24 @@ class PickupRequestResponse(BaseModel):
     status: str
     pickup_time: Optional[str]
     created_at: Optional[str]
+
+class PickupRequestsListResponse(BaseModel):
+    pickup_requests: list[PickupRequestResponse]
+    pagination: Pagination
+
+class DropoffRequestCreate(BaseModel):
+    zone_id: Optional[int] = None
+    drop_lat: float
+    drop_lng: float
+    shift_end_time: time
+    service_date: date
+
+class DropoffRequestUpdate(BaseModel):
+    zone_id: Optional[int] = None
+    drop_lat: Optional[float] = None
+    drop_lng: Optional[float] = None
+    shift_end_time: Optional[time] = None
+    service_date: Optional[date] = None
 
 class DropoffRequestResponse(BaseModel):
     dropoff_id: int
