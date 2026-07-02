@@ -7,7 +7,6 @@ import { Badge } from '../ui/badge';
 import { Switch } from '../ui/switch';
 import { Label } from '../ui/label';
 import { InteractiveMap } from '../shared/InteractiveMap';
-import { routeAssignmentApi, stopPassengerApi } from '../../services/transportApi';
 
 interface Passenger {
   id: string;
@@ -221,8 +220,6 @@ export const DriverRoute: React.FC = () => {
   };
 
   const handlePassengerToggle = (routeId: string, stopId: string, passengerId: string) => {
-    let nextBoarded = false;
-
     setRoutes(prev =>
       prev.map(route =>
         route.id === routeId
@@ -234,10 +231,7 @@ export const DriverRoute: React.FC = () => {
                       ...stop,
                       passengers: stop.passengers.map(passenger =>
                         passenger.id === passengerId
-                          ? (() => {
-                              nextBoarded = !passenger.boarded;
-                              return { ...passenger, boarded: nextBoarded };
-                            })()
+                          ? { ...passenger, boarded: !passenger.boarded }
                           : passenger
                       ),
                     }
@@ -247,13 +241,6 @@ export const DriverRoute: React.FC = () => {
           : route
       )
     );
-
-    if (nextBoarded) {
-      void stopPassengerApi.markBoarded({
-        stop_id: stopId,
-        passenger_id: passengerId,
-      });
-    }
   };
 
   const handleRouteStatusChange = (routeId: string, newStatus: Route['status']) => {
@@ -262,14 +249,6 @@ export const DriverRoute: React.FC = () => {
         route.id === routeId ? { ...route, status: newStatus } : route
       )
     );
-
-    if (newStatus === 'in-progress') {
-      void routeAssignmentApi.start(routeId);
-    }
-
-    if (newStatus === 'completed') {
-      void routeAssignmentApi.complete(routeId);
-    }
   };
 
   const getStatusColor = (status: Route['status']) => {
