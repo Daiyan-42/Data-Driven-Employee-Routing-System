@@ -125,3 +125,141 @@ class DriverService:
             "phone": user.get("phone"),
             "user_status": user.get("status"),
         }
+
+    # --- Driver self-service methods (used by drivers/me router) ---
+    def get_by_user_id(self, user_id: int):
+        res = (
+            self.db.table("driver")
+            .select("driver_id, user_id, license_no, status, users(name, email, phone, status), vehicle(*)")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return None
+        return self._flatten_with_vehicle(res.data[0])
+
+    def _flatten_with_vehicle(self, row: dict) -> dict:
+        user = row.get("users", {}) or {}
+        vehicle = row.get("vehicle") or []
+        vehicle = vehicle[0] if vehicle else None
+        out = {
+            "driver_id": row["driver_id"],
+            "user_id": row["user_id"],
+            "license_no": row.get("license_no"),
+            "status": row.get("status"),
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "phone": user.get("phone"),
+            "user_status": user.get("status"),
+        }
+        if vehicle:
+            out["vehicle"] = {
+                "vehicle_id": vehicle.get("vehicle_id"),
+                "plate_no": vehicle.get("plate_no"),
+                "make": vehicle.get("make"),
+                "model": vehicle.get("model"),
+            }
+        else:
+            out["vehicle"] = None
+        return out
+
+    def update_profile(self, user_id: int, payload: dict):
+        # Update users table fields: phone (and optionally name)
+        user_payload = {}
+        if "phone" in payload:
+            user_payload["phone"] = payload["phone"]
+        if "name" in payload:
+            user_payload["name"] = payload["name"]
+
+        if user_payload:
+            self.db.table("users").update(user_payload).eq("user_id", user_id).execute()
+
+        # Update driver-specific fields (license)
+        if "license_no" in payload:
+            # find driver_id for user
+            drv = (
+                self.db.table("driver").select("driver_id").eq("user_id", user_id).limit(1).execute()
+            )
+            if drv.data:
+                driver_id = drv.data[0]["driver_id"]
+                self.db.table("driver").update({"license_no": payload["license_no"]}).eq("driver_id", driver_id).execute()
+
+        return self.get_by_user_id(user_id)
+
+    def start_assignment_for_driver(self, user_id: int, assignment_id: int):
+        # verify assignment belongs to driver
+        drv = (
+            self.db.table("driver").select("driver_id").eq("user_id", user_id).limit(1).execute()
+        )
+        if not drv.data:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        driver_id = drv.data[0]["driver_id"]
+
+        ra = (
+            self.db.table("route_assignment").select("*").eq("route_assignment_id", assignment_id).limit(1).execute()
+        )
+        if not ra.data:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+        rec = ra.data[0]
+        if rec.get("driver_id") != driver_id:
+            raise HTTPException(status_code=403, detail="Not authorized for this assignment")
+
+        # set status to InProgress and started_at
+        self.db.table("route_assignment").update({"status": "InProgress"}).eq("route_assignment_id", assignment_id).execute()
+        return {"message": "assignment started", "assignment_id": assignment_id}
+
+    def complete_assignment_for_driver(self, user_id: int, assignment_id: int):
+        # similar checks
+        drv = (
+            self.db.table("driver").select("driver_id").eq("user_id", user_id).limit(1).execute()
+        )
+        if not drv.data:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        driver_id = drv.data[0]["driver_id"]
+
+        ra = (
+            self.db.table("route_assignment").select("*").eq("route_assignment_id", assignment_id).limit(1).execute()
+        )
+        if not ra.data:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+        rec = ra.data[0]
+        if rec.get("driver_id") != driver_id:
+            raise HTTPException(status_code=403, detail="Not authorized for this assignment")
+
+        self.db.table("route_assignment").update({"status": "Completed"}).eq("route_assignment_id", assignment_id).execute()
+        return {"message": "assignment completed", "assignment_id": assignment_id}
+
+    def board_passenger(self, user_id: int, stop_id: int, employee_id: int):
+        # ensure driver owns an active assignment for the route_stop
+        drv = (
+            self.db.table("driver").select("driver_id").eq("user_id", user_id).limit(1).execute()
+        )
+        if not drv.data:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        driver_id = drv.data[0]["driver_id"]
+
+        # find route_stop
+        rs = (
+            self.db.table("route_stop").select("route_stop_id, route_assignment_id").eq("route_stop_id", stop_id).limit(1).execute()
+        )
+        if not rs.data:
+            raise HTTPException(status_code=404, detail="Stop not found")
+        route_stop = rs.data[0]
+
+        # check assignment belongs to driver
+        ra = (
+            self.db.table("route_assignment").select("*").eq("route_assignment_id", route_stop.get("route_assignment_id")).limit(1).execute()
+        )
+        if not ra.data or ra.data[0].get("driver_id") != driver_id:
+            raise HTTPException(status_code=403, detail="Not authorized for this stop")
+
+        # find stop_passenger record and mark boarded
+        sp = (
+            self.db.table("stop_passenger").select("stop_passenger_id, boarded").eq("route_stop_id", stop_id).eq("employee_id", employee_id).limit(1).execute()
+        )
+        if not sp.data:
+            raise HTTPException(status_code=404, detail="Passenger not assigned to this stop")
+
+        self.db.table("stop_passenger").update({"boarded": True}).eq("stop_passenger_id", sp.data[0]["stop_passenger_id"]).execute()
+        return {"message": "passenger boarded", "employee_id": employee_id, "stop_id": stop_id}

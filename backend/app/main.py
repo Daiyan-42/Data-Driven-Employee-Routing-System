@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, drivers, vehicles, pickup_requests, dropoff_requests
+from app.routers import auth, drivers, vehicles, pickup_requests, dropoff_requests,drivers_me
 
 app = FastAPI(
     title="Employee Routing System — Backend",
@@ -21,8 +21,10 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(drivers.router)
 app.include_router(vehicles.router)
+app.include_router(drivers_me.router)
 app.include_router(pickup_requests.router)
 app.include_router(dropoff_requests.router)
+
 
 @app.get("/", tags=["Health"])
 def health():
