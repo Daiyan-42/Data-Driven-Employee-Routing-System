@@ -1,5 +1,5 @@
-import { apiUrl } from '../config/api';
-import { mockUsers, type User as UiUser } from '../data/mockData';
+import { apiUrl } from "../config/api";
+import { mockUsers, type User as UiUser } from "../data/mockData";
 import type {
   AssignmentStatus,
   Driver as ApiDriver,
@@ -27,14 +27,17 @@ import type {
   Vehicle as ApiVehicle,
   VehiclesListResponse,
   Zone as ApiZone,
-} from '../types/api';
+  EmployeeProfileResponse,
+  EmployeeProfileUpdate,
+  ScheduleResponse,
+} from "../types/api";
 
 const sleep = (ms = 700) => new Promise((resolve) => setTimeout(resolve, ms));
-const nowDate = () => new Date().toISOString().split('T')[0];
-const nowTime = () => new Date().toISOString().split('T')[1].slice(0, 8);
+const nowDate = () => new Date().toISOString().split("T")[0];
+const nowTime = () => new Date().toISOString().split("T")[1].slice(0, 8);
 const mockId = () => Date.now();
-const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
+const ACCESS_TOKEN_KEY = "access_token";
+const REFRESH_TOKEN_KEY = "refresh_token";
 
 const getAccessToken = () => localStorage.getItem(ACCESS_TOKEN_KEY);
 const getRefreshToken = () => localStorage.getItem(REFRESH_TOKEN_KEY);
@@ -53,7 +56,7 @@ const clearTokens = () => {
 
 const makeHeaders = (withAuth = false): HeadersInit => {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (withAuth) {
@@ -75,11 +78,11 @@ const parseError = async (response: Response) => {
   }
 };
 
-type UserRoleUi = 'employee' | 'driver' | 'admin';
+type UserRoleUi = "employee" | "driver" | "admin";
 const toApiRole = (role: UserRoleUi): UserRoleApi => {
-  if (role === 'employee') return 'Employee';
-  if (role === 'driver') return 'Driver';
-  return 'Admin';
+  if (role === "employee") return "Employee";
+  if (role === "driver") return "Driver";
+  return "Admin";
 };
 
 const toUiUser = (user: {
@@ -92,8 +95,13 @@ const toUiUser = (user: {
   id: String(user.user_id),
   name: user.name,
   email: user.email,
-  phone: user.phone ?? '',
-  role: user.role === 'Employee' ? 'employee' : user.role === 'Driver' ? 'driver' : 'admin',
+  phone: user.phone ?? "",
+  role:
+    user.role === "Employee"
+      ? "employee"
+      : user.role === "Driver"
+        ? "driver"
+        : "admin",
 });
 
 const mockPagination = (page = 1, limit = 20, total = 1): Pagination => ({
@@ -111,15 +119,15 @@ const fallbackApiUser = (): ApiUser => {
     email: fallback.email,
     phone: fallback.phone,
     role: toApiRole(fallback.role),
-    status: 'Active',
+    status: "Active",
     created_at: new Date().toISOString(),
   };
 };
 
 export const authApi = {
   async login(payload: { email: string; password: string }) {
-    const response = await fetch(apiUrl('/auth/login'), {
-      method: 'POST',
+    const response = await fetch(apiUrl("/auth/login"), {
+      method: "POST",
       headers: makeHeaders(false),
       body: JSON.stringify(payload),
     });
@@ -152,7 +160,7 @@ export const authApi = {
       email: data.user.email,
       phone: data.user.phone,
       role: data.user.role,
-      status: data.user.status ?? 'Active',
+      status: data.user.status ?? "Active",
       created_at: new Date().toISOString(),
     };
 
@@ -172,8 +180,8 @@ export const authApi = {
     password: string;
     role: UserRoleApi;
   }) {
-    const response = await fetch(apiUrl('/auth/register'), {
-      method: 'POST',
+    const response = await fetch(apiUrl("/auth/register"), {
+      method: "POST",
       headers: makeHeaders(false),
       body: JSON.stringify(payload),
     });
@@ -191,12 +199,15 @@ export const authApi = {
       setTokens(data.tokens.access_token, data.tokens.refresh_token);
     }
 
-    return { user_id: data.user.user_id, message: 'User registered successfully' };
+    return {
+      user_id: data.user.user_id,
+      message: "User registered successfully",
+    };
   },
 
   async refresh(payload: { refresh_token: string }) {
-    const response = await fetch(apiUrl('/auth/refresh'), {
-      method: 'POST',
+    const response = await fetch(apiUrl("/auth/refresh"), {
+      method: "POST",
       headers: makeHeaders(false),
       body: JSON.stringify(payload),
     });
@@ -211,8 +222,8 @@ export const authApi = {
   },
 
   async logout() {
-    const response = await fetch(apiUrl('/auth/logout'), {
-      method: 'POST',
+    const response = await fetch(apiUrl("/auth/logout"), {
+      method: "POST",
       headers: makeHeaders(true),
     });
 
@@ -226,11 +237,18 @@ export const authApi = {
     return { message: data.message };
   },
 
-  async loginWithRole(input: { email: string; password: string; role: UserRoleUi }) {
-    const result = await this.login({ email: input.email, password: input.password });
+  async loginWithRole(input: {
+    email: string;
+    password: string;
+    role: UserRoleUi;
+  }) {
+    const result = await this.login({
+      email: input.email,
+      password: input.password,
+    });
 
     if (result.user.role !== toApiRole(input.role)) {
-      throw new Error('Role mismatch for this account');
+      throw new Error("Role mismatch for this account");
     }
 
     const user = toUiUser(result.user);
@@ -247,16 +265,22 @@ export const authApi = {
 };
 
 export const adminApi = {
-  async getPickupRoutingInput(params: { service_date: string; shift_start_time?: string }) {
+  async getPickupRoutingInput(params: {
+    service_date: string;
+    shift_start_time?: string;
+  }) {
     const query = new URLSearchParams({ service_date: params.service_date });
     if (params.shift_start_time) {
-      query.set('shift_start_time', params.shift_start_time);
+      query.set("shift_start_time", params.shift_start_time);
     }
 
-    const response = await fetch(apiUrl(`/admin/pickup-routing/input?${query.toString()}`), {
-      method: 'GET',
-      headers: makeHeaders(true),
-    });
+    const response = await fetch(
+      apiUrl(`/admin/pickup-routing/input?${query.toString()}`),
+      {
+        method: "GET",
+        headers: makeHeaders(true),
+      },
+    );
 
     if (!response.ok) {
       throw new Error(await parseError(response));
@@ -274,8 +298,8 @@ export const adminApi = {
     stop_dwell_minutes?: number;
     average_speed_kmph?: number;
   }) {
-    const response = await fetch(apiUrl('/admin/pickup-routing/run'), {
-      method: 'POST',
+    const response = await fetch(apiUrl("/admin/pickup-routing/run"), {
+      method: "POST",
       headers: makeHeaders(true),
       body: JSON.stringify(payload),
     });
@@ -299,16 +323,19 @@ export const pickupRequestApi = {
     limit?: number;
   }) {
     const query = new URLSearchParams();
-    query.set('future_only', 'true');
-    if (params?.service_date) query.set('service_date', params.service_date);
-    if (params?.status) query.set('status', params.status);
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.limit) query.set('limit', String(params.limit));
+    query.set("future_only", "true");
+    if (params?.service_date) query.set("service_date", params.service_date);
+    if (params?.status) query.set("status", params.status);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
-    const response = await fetch(apiUrl(`/pickup-requests?${query.toString()}`), {
-      method: 'GET',
-      headers: makeHeaders(true),
-    });
+    const response = await fetch(
+      apiUrl(`/pickup-requests?${query.toString()}`),
+      {
+        method: "GET",
+        headers: makeHeaders(true),
+      },
+    );
 
     if (!response.ok) {
       throw new Error(await parseError(response));
@@ -324,7 +351,7 @@ export const pickupRequestApi = {
     pickup_lng: number;
     shift_start_time: string;
     service_date: string;
-    request_type: 'Regular' | 'Ad-hoc';
+    request_type: "Regular" | "Ad-hoc";
   }) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl('/pickup-requests'), {
@@ -339,14 +366,14 @@ export const pickupRequestApi = {
     return {
       pickup_id: mockId(),
       ...payload,
-      status: 'Pending' as RequestStatus,
+      status: "Pending" as RequestStatus,
       created_at: new Date().toISOString(),
     };
   },
 
   async getById(pickupId: number) {
     const response = await fetch(apiUrl(`/pickup-requests/${pickupId}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -383,8 +410,8 @@ export const pickupRequestApi = {
       pickup_lng: payload.pickup_lng ?? 90.4,
       shift_start_time: payload.shift_start_time ?? nowTime(),
       service_date: payload.service_date ?? nowDate(),
-      request_type: 'Regular' as RequestType,
-      status: 'Pending' as RequestStatus,
+      request_type: "Regular" as RequestType,
+      status: "Pending" as RequestStatus,
       created_at: new Date().toISOString(),
     };
   },
@@ -398,7 +425,10 @@ export const pickupRequestApi = {
     return { success: true, pickup_id: pickupId };
   },
 
-  async approve(pickupId: number, payload?: { route_id?: number; pickup_time?: string }) {
+  async approve(
+    pickupId: number,
+    payload?: { route_id?: number; pickup_time?: string },
+  ) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl(`/pickup-requests/${pickupId}/approve`), {
     //   method: 'POST',
@@ -417,8 +447,8 @@ export const pickupRequestApi = {
       pickup_lng: 90.4,
       shift_start_time: nowTime(),
       service_date: nowDate(),
-      request_type: 'Regular' as RequestType,
-      status: 'Approved' as RequestStatus,
+      request_type: "Regular" as RequestType,
+      status: "Approved" as RequestStatus,
       pickup_time: payload?.pickup_time,
       created_at: new Date().toISOString(),
     };
@@ -442,8 +472,8 @@ export const pickupRequestApi = {
       pickup_lng: 90.4,
       shift_start_time: nowTime(),
       service_date: nowDate(),
-      request_type: 'Regular' as RequestType,
-      status: 'Rejected' as RequestStatus,
+      request_type: "Regular" as RequestType,
+      status: "Rejected" as RequestStatus,
       created_at: new Date().toISOString(),
       reason: payload?.reason,
     };
@@ -467,8 +497,8 @@ export const pickupRequestApi = {
         pickup_lat: schedule.latitude,
         pickup_lng: schedule.longitude,
         shift_start_time: `${schedule.shiftTime}:00`,
-        service_date: new Date().toISOString().split('T')[0],
-        request_type: 'Regular',
+        service_date: new Date().toISOString().split("T")[0],
+        request_type: "Regular",
       });
     }
 
@@ -476,9 +506,9 @@ export const pickupRequestApi = {
       success: true,
       requestCount: input.schedules.length,
       assignment: {
-        vehiclePlate: 'ABC-1234',
-        driverName: 'Sarah Wilson',
-        driverPhone: '+1-555-0202',
+        vehiclePlate: "ABC-1234",
+        driverName: "Sarah Wilson",
+        driverPhone: "+1-555-0202",
       },
     };
   },
@@ -498,16 +528,16 @@ export const pickupRequestApi = {
       pickup_lng: input.longitude,
       shift_start_time: `${input.shiftTime}:00`,
       service_date: input.serviceDate,
-      request_type: 'Ad-hoc',
+      request_type: "Ad-hoc",
     });
 
     return {
       success: true,
       pickup_request: created,
       assignment: {
-        vehiclePlate: 'XYZ-5678',
-        driverName: 'Mike Johnson',
-        driverPhone: '+1-555-0303',
+        vehiclePlate: "XYZ-5678",
+        driverName: "Mike Johnson",
+        driverPhone: "+1-555-0303",
       },
     };
   },
@@ -557,7 +587,7 @@ export const dropoffRequestApi = {
     return {
       dropoff_id: mockId(),
       ...payload,
-      status: 'Pending',
+      status: "Pending",
       created_at: new Date().toISOString(),
     };
   },
@@ -576,7 +606,7 @@ export const dropoffRequestApi = {
       drop_lng: 90.4,
       shift_end_time: nowTime(),
       service_date: nowDate(),
-      status: 'Pending',
+      status: "Pending",
       created_at: new Date().toISOString(),
     };
   },
@@ -607,7 +637,7 @@ export const dropoffRequestApi = {
       drop_lng: payload.drop_lng ?? 90.4,
       shift_end_time: payload.shift_end_time ?? nowTime(),
       service_date: payload.service_date ?? nowDate(),
-      status: 'Pending',
+      status: "Pending",
       created_at: new Date().toISOString(),
     };
   },
@@ -642,9 +672,9 @@ export const dropoffRequestApi = {
       success: true,
       dropoff_request: created,
       assignment: {
-        vehiclePlate: 'ABC-1234',
-        driverName: 'Sarah Wilson',
-        driverPhone: '+1-555-0202',
+        vehiclePlate: "ABC-1234",
+        driverName: "Sarah Wilson",
+        driverPhone: "+1-555-0202",
       },
     };
   },
@@ -698,7 +728,7 @@ export const routeAssignmentApi = {
       driver_id: payload.driver_id,
       departure_time: payload.departure_time,
       arrival_time: payload.arrival_time,
-      status: payload.status ?? 'Scheduled',
+      status: payload.status ?? "Scheduled",
     };
   },
 
@@ -714,7 +744,7 @@ export const routeAssignmentApi = {
       route_id: 1,
       vehicle_id: 1,
       driver_id: 1,
-      status: 'Scheduled' as AssignmentStatus,
+      status: "Scheduled" as AssignmentStatus,
     };
   },
 
@@ -745,7 +775,7 @@ export const routeAssignmentApi = {
       driver_id: payload.driver_id ?? 1,
       departure_time: payload.departure_time,
       arrival_time: payload.arrival_time,
-      status: payload.status ?? 'Scheduled',
+      status: payload.status ?? "Scheduled",
     };
   },
 
@@ -765,7 +795,7 @@ export const routeAssignmentApi = {
     // return (await response.json()) as { assignment_id: number; status: string };
 
     await sleep(200);
-    return { assignment_id: assignmentId, status: 'In-Progress' };
+    return { assignment_id: assignmentId, status: "In-Progress" };
   },
 
   async complete(assignmentId: string) {
@@ -775,7 +805,7 @@ export const routeAssignmentApi = {
     // return (await response.json()) as { assignment_id: number; status: string };
 
     await sleep(200);
-    return { assignment_id: assignmentId, status: 'Completed' };
+    return { assignment_id: assignmentId, status: "Completed" };
   },
 };
 
@@ -790,7 +820,10 @@ export const stopPassengerApi = {
     return [] as ApiStopPassenger[];
   },
 
-  async add(stopId: number, payload: { employee_id: number; boarded_status?: boolean }) {
+  async add(
+    stopId: number,
+    payload: { employee_id: number; boarded_status?: boolean },
+  ) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl(`/stops/${stopId}/passengers`), {
     //   method: 'POST',
@@ -838,17 +871,25 @@ export const stopPassengerApi = {
 };
 
 export const userApi = {
-  async list(params?: { role?: UserRoleApi; status?: ActiveStatus; page?: number; limit?: number }) {
+  async list(params?: {
+    role?: UserRoleApi;
+    status?: ActiveStatus;
+    page?: number;
+    limit?: number;
+  }) {
     const query = new URLSearchParams();
-    if (params?.role) query.set('role', params.role);
-    if (params?.status) query.set('status', params.status);
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.role) query.set("role", params.role);
+    if (params?.status) query.set("status", params.status);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
-    const response = await fetch(apiUrl(`/users${query.toString() ? `?${query.toString()}` : ''}`), {
-      method: 'GET',
-      headers: makeHeaders(true),
-    });
+    const response = await fetch(
+      apiUrl(`/users${query.toString() ? `?${query.toString()}` : ""}`),
+      {
+        method: "GET",
+        headers: makeHeaders(true),
+      },
+    );
 
     if (!response.ok) {
       throw new Error(await parseError(response));
@@ -863,7 +904,10 @@ export const userApi = {
       users: data.users,
       pagination: {
         current_page: data.pagination.page,
-        total_pages: Math.max(1, Math.ceil(data.pagination.total / data.pagination.limit)),
+        total_pages: Math.max(
+          1,
+          Math.ceil(data.pagination.total / data.pagination.limit),
+        ),
         page_size: data.pagination.limit,
         total_items: data.pagination.total,
       },
@@ -872,7 +916,7 @@ export const userApi = {
 
   async getById(userId: number) {
     const response = await fetch(apiUrl(`/users/${userId}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -883,9 +927,12 @@ export const userApi = {
     return (await response.json()) as ApiUser;
   },
 
-  async update(userId: number, payload: { name?: string; phone?: string; status?: ActiveStatus }) {
+  async update(
+    userId: number,
+    payload: { name?: string; phone?: string; status?: ActiveStatus },
+  ) {
     const response = await fetch(apiUrl(`/users/${userId}`), {
-      method: 'PUT',
+      method: "PUT",
       headers: makeHeaders(true),
       body: JSON.stringify(payload),
     });
@@ -899,7 +946,7 @@ export const userApi = {
 
   async remove(userId: number) {
     const response = await fetch(apiUrl(`/users/${userId}`), {
-      method: 'DELETE',
+      method: "DELETE",
       headers: makeHeaders(true),
     });
 
@@ -911,9 +958,12 @@ export const userApi = {
     return { success: true, user_id: userId, message: data.message };
   },
 
-  async changePassword(userId: number, payload: { old_password: string; new_password: string }) {
+  async changePassword(
+    userId: number,
+    payload: { old_password: string; new_password: string },
+  ) {
     const response = await fetch(apiUrl(`/users/${userId}/change-password`), {
-      method: 'POST',
+      method: "POST",
       headers: makeHeaders(true),
       body: JSON.stringify(payload),
     });
@@ -930,12 +980,13 @@ export const userApi = {
 export const employeeApi = {
   async list(params?: { is_active?: boolean; page?: number; limit?: number }) {
     const query = new URLSearchParams();
-    if (params?.is_active != null) query.set('is_active', String(params.is_active));
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.is_active != null)
+      query.set("is_active", String(params.is_active));
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
     const response = await fetch(apiUrl(`/employees?${query.toString()}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -946,7 +997,12 @@ export const employeeApi = {
     return (await response.json()) as EmployeesListResponse;
   },
 
-  async create(payload: { user_id: number; home_lat?: number; home_lng?: number; is_active?: boolean }) {
+  async create(payload: {
+    user_id: number;
+    home_lat?: number;
+    home_lng?: number;
+    is_active?: boolean;
+  }) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl('/employees'), {
     //   method: 'POST',
@@ -968,7 +1024,7 @@ export const employeeApi = {
 
   async getById(employeeId: number) {
     const response = await fetch(apiUrl(`/employees/${employeeId}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -979,7 +1035,10 @@ export const employeeApi = {
     return (await response.json()) as ApiEmployee;
   },
 
-  async update(employeeId: number, payload: { home_lat?: number; home_lng?: number; is_active?: boolean }) {
+  async update(
+    employeeId: number,
+    payload: { home_lat?: number; home_lng?: number; is_active?: boolean },
+  ) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl(`/employees/${employeeId}`), {
     //   method: 'PUT',
@@ -1025,14 +1084,17 @@ export const employeeApi = {
       pickup_lng: 90.4,
       shift_start_time: nowTime(),
       service_date: nowDate(),
-      request_type: 'Regular' as RequestType,
-      status: (params?.status ?? 'Approved') as RequestStatus,
+      request_type: "Regular" as RequestType,
+      status: (params?.status ?? "Approved") as RequestStatus,
       created_at: new Date().toISOString(),
     };
     return [one];
   },
 
-  async dropoffHistory(employeeId: number, params?: { from_date?: string; to_date?: string }) {
+  async dropoffHistory(
+    employeeId: number,
+    params?: { from_date?: string; to_date?: string },
+  ) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl(`/employees/${employeeId}/dropoff-history`));
     // if (!response.ok) throw new Error('Employee dropoff history failed');
@@ -1047,21 +1109,62 @@ export const employeeApi = {
         drop_lng: 90.4,
         shift_end_time: nowTime(),
         service_date: params?.from_date ?? nowDate(),
-        status: 'Approved',
+        status: "Approved",
         created_at: new Date().toISOString(),
       },
     ];
+  },
+
+  async getProfile(): Promise<EmployeeProfileResponse> {
+    const response = await fetch(apiUrl("/employees/me"), {
+      method: "GET",
+      headers: makeHeaders(true),
+    });
+    if (!response.ok) {
+      throw new Error(await parseError(response));
+    }
+    return (await response.json()) as EmployeeProfileResponse;
+  },
+
+  async updateProfile(
+    payload: EmployeeProfileUpdate,
+  ): Promise<EmployeeProfileResponse> {
+    const response = await fetch(apiUrl("/employees/me"), {
+      method: "PUT",
+      headers: makeHeaders(true),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await parseError(response));
+    }
+    return (await response.json()) as EmployeeProfileResponse;
+  },
+
+  async getSchedule(serviceDate?: string): Promise<ScheduleResponse> {
+    const today = new Date().toISOString().split("T")[0];
+    const query = new URLSearchParams({ service_date: serviceDate ?? today });
+    const response = await fetch(
+      apiUrl(`/employees/me/schedule?${query.toString()}`),
+      {
+        method: "GET",
+        headers: makeHeaders(true),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(await parseError(response));
+    }
+    return (await response.json()) as ScheduleResponse;
   },
 };
 
 export const driverApi = {
   async list(params?: { page?: number; limit?: number }) {
     const query = new URLSearchParams();
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
     const response = await fetch(apiUrl(`/drivers?${query.toString()}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -1083,12 +1186,16 @@ export const driverApi = {
     // return (await response.json()) as ApiDriver;
 
     await sleep(250);
-    return { driver_id: mockId(), user_id: payload.user_id, license_no: payload.license_no };
+    return {
+      driver_id: mockId(),
+      user_id: payload.user_id,
+      license_no: payload.license_no,
+    };
   },
 
   async getById(driverId: number) {
     const response = await fetch(apiUrl(`/drivers/${driverId}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -1110,7 +1217,11 @@ export const driverApi = {
     // return (await response.json()) as ApiDriver;
 
     await sleep(220);
-    return { driver_id: driverId, user_id: 2, license_no: payload.license_no ?? 'DL-123456789' };
+    return {
+      driver_id: driverId,
+      user_id: 2,
+      license_no: payload.license_no ?? "DL-123456789",
+    };
   },
 
   async remove(driverId: number) {
@@ -1122,7 +1233,10 @@ export const driverApi = {
     return { success: true, driver_id: driverId };
   },
 
-  async assignments(driverId: number, params?: { service_date?: string; status?: AssignmentStatus }) {
+  async assignments(
+    driverId: number,
+    params?: { service_date?: string; status?: AssignmentStatus },
+  ) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl(`/drivers/${driverId}/assignments`));
     // if (!response.ok) throw new Error('Driver assignments failed');
@@ -1135,7 +1249,7 @@ export const driverApi = {
         route_id: 1,
         vehicle_id: 1,
         driver_id: driverId,
-        status: params?.status ?? 'Scheduled',
+        status: params?.status ?? "Scheduled",
       },
     ];
   },
@@ -1149,7 +1263,13 @@ export const zoneApi = {
     // return (await response.json()) as ApiZone[];
 
     await sleep(200);
-    return [{ zone_id: 1, zone_name: 'Gulshan Area', description: 'Gulshan 1, 2 and Banani' }] as ApiZone[];
+    return [
+      {
+        zone_id: 1,
+        zone_name: "Gulshan Area",
+        description: "Gulshan 1, 2 and Banani",
+      },
+    ] as ApiZone[];
   },
 
   async create(payload: { zone_name: string; description?: string }) {
@@ -1163,7 +1283,11 @@ export const zoneApi = {
     // return (await response.json()) as ApiZone;
 
     await sleep(220);
-    return { zone_id: mockId(), zone_name: payload.zone_name, description: payload.description };
+    return {
+      zone_id: mockId(),
+      zone_name: payload.zone_name,
+      description: payload.description,
+    };
   },
 
   async getById(zoneId: number) {
@@ -1173,10 +1297,17 @@ export const zoneApi = {
     // return (await response.json()) as ApiZone;
 
     await sleep(200);
-    return { zone_id: zoneId, zone_name: `Zone ${zoneId}`, description: 'Mock zone' };
+    return {
+      zone_id: zoneId,
+      zone_name: `Zone ${zoneId}`,
+      description: "Mock zone",
+    };
   },
 
-  async update(zoneId: number, payload: { zone_name?: string; description?: string }) {
+  async update(
+    zoneId: number,
+    payload: { zone_name?: string; description?: string },
+  ) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl(`/zones/${zoneId}`), {
     //   method: 'PUT',
@@ -1187,7 +1318,11 @@ export const zoneApi = {
     // return (await response.json()) as ApiZone;
 
     await sleep(220);
-    return { zone_id: zoneId, zone_name: payload.zone_name ?? `Zone ${zoneId}`, description: payload.description };
+    return {
+      zone_id: zoneId,
+      zone_name: payload.zone_name ?? `Zone ${zoneId}`,
+      description: payload.description,
+    };
   },
 
   async remove(zoneId: number) {
@@ -1202,17 +1337,17 @@ export const zoneApi = {
 
 export const vehicleApi = {
   async list(params?: {
-    status?: 'Active' | 'Inactive' | 'Maintenance';
+    status?: "Active" | "Inactive" | "Maintenance";
     page?: number;
     limit?: number;
   }) {
     const query = new URLSearchParams();
-    if (params?.status) query.set('status', params.status);
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.status) query.set("status", params.status);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
     const response = await fetch(apiUrl(`/vehicles?${query.toString()}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -1228,7 +1363,7 @@ export const vehicleApi = {
     capacity: number;
     parking_lat?: number;
     parking_lng?: number;
-    status?: 'Active' | 'Inactive' | 'Maintenance';
+    status?: "Active" | "Inactive" | "Maintenance";
   }) {
     // Backend API call (enable when backend is ready):
     // const response = await fetch(apiUrl('/vehicles'), {
@@ -1246,13 +1381,13 @@ export const vehicleApi = {
       capacity: payload.capacity,
       parking_lat: payload.parking_lat,
       parking_lng: payload.parking_lng,
-      status: payload.status ?? 'Active',
+      status: payload.status ?? "Active",
     };
   },
 
   async getById(vehicleId: number) {
     const response = await fetch(apiUrl(`/vehicles/${vehicleId}`), {
-      method: 'GET',
+      method: "GET",
       headers: makeHeaders(true),
     });
 
@@ -1270,7 +1405,7 @@ export const vehicleApi = {
       capacity?: number;
       parking_lat?: number;
       parking_lng?: number;
-      status?: 'Active' | 'Inactive' | 'Maintenance';
+      status?: "Active" | "Inactive" | "Maintenance";
     },
   ) {
     // Backend API call (enable when backend is ready):
@@ -1285,11 +1420,11 @@ export const vehicleApi = {
     await sleep(220);
     return {
       vehicle_id: vehicleId,
-      plate_no: payload.plate_no ?? 'DHA-GA-11-2345',
+      plate_no: payload.plate_no ?? "DHA-GA-11-2345",
       capacity: payload.capacity ?? 15,
       parking_lat: payload.parking_lat,
       parking_lng: payload.parking_lng,
-      status: payload.status ?? 'Active',
+      status: payload.status ?? "Active",
     };
   },
 
@@ -1315,8 +1450,8 @@ export const vehicleApi = {
         route_id: 1,
         vehicle_id: vehicleId,
         driver_id: 1,
-        status: 'Scheduled' as AssignmentStatus,
-        departure_time: params?.service_date ? '08:00:00' : undefined,
+        status: "Scheduled" as AssignmentStatus,
+        departure_time: params?.service_date ? "08:00:00" : undefined,
       },
     ];
   },
@@ -1340,9 +1475,9 @@ export const routeApi = {
       {
         route_id: 1,
         zone_id: params?.zone_id,
-        route_type: params?.route_type ?? 'pickup',
+        route_type: params?.route_type ?? "pickup",
         service_date: params?.service_date ?? nowDate(),
-        shift_time: '09:00:00',
+        shift_time: "09:00:00",
         total_distance_km: 12.3,
         total_travel_time_min: 45,
         created_at: new Date().toISOString(),
@@ -1350,7 +1485,11 @@ export const routeApi = {
     ];
     return {
       routes,
-      pagination: mockPagination(params?.page ?? 1, params?.limit ?? 20, routes.length),
+      pagination: mockPagination(
+        params?.page ?? 1,
+        params?.limit ?? 20,
+        routes.length,
+      ),
     };
   },
 
@@ -1394,9 +1533,9 @@ export const routeApi = {
     return {
       route_id: routeId,
       zone_id: 1,
-      route_type: 'pickup' as RouteType,
+      route_type: "pickup" as RouteType,
       service_date: nowDate(),
-      shift_time: '09:00:00',
+      shift_time: "09:00:00",
       total_distance_km: 12.3,
       total_travel_time_min: 45,
       created_at: new Date().toISOString(),
@@ -1426,9 +1565,9 @@ export const routeApi = {
     return {
       route_id: routeId,
       zone_id: payload.zone_id,
-      route_type: 'pickup' as RouteType,
+      route_type: "pickup" as RouteType,
       service_date: nowDate(),
-      shift_time: payload.shift_time ?? '09:00:00',
+      shift_time: payload.shift_time ?? "09:00:00",
       total_distance_km: payload.total_distance_km ?? 12.3,
       total_travel_time_min: payload.total_travel_time_min ?? 45,
       created_at: new Date().toISOString(),
@@ -1540,9 +1679,9 @@ export const routeApi = {
     return {
       route_id: routeId,
       zone_id: 1,
-      route_type: 'pickup' as RouteType,
+      route_type: "pickup" as RouteType,
       service_date: nowDate(),
-      shift_time: '09:00:00',
+      shift_time: "09:00:00",
       total_distance_km: 10.8,
       total_travel_time_min: 39,
       created_at: new Date().toISOString(),

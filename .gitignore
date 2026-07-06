@@ -1,6 +1,7 @@
 *.pdf
 .DS_Store
 backend/myenv/
+backend/capstone/
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/.env
