@@ -1,10 +1,11 @@
-export type UserRole = 'Employee' | 'Driver' | 'Admin';
-export type UserStatus = 'Active' | 'Inactive';
-export type RequestStatus = 'Pending' | 'Approved' | 'Rejected';
-export type RequestType = 'Regular' | 'Ad-hoc';
-export type VehicleStatus = 'Active' | 'Inactive' | 'Maintenance';
-export type RouteType = 'pickup' | 'dropoff';
-export type AssignmentStatus = 'Scheduled' | 'In-Progress' | 'Completed' | 'Cancelled';
+export type UserRole = "Employee" | "Driver" | "Admin";
+export type UserStatus = "Active" | "Inactive";
+export type RequestStatus = "Pending" | "Approved" | "Rejected";
+export type RequestType = "Regular" | "Ad-hoc";
+export type VehicleStatus = "Active" | "Inactive" | "Maintenance";
+export type RouteType = "pickup" | "dropoff";
+export type AssignmentStatus =
+  "Scheduled" | "In-Progress" | "Completed" | "Cancelled";
 
 export interface User {
   user_id: number;
@@ -200,4 +201,55 @@ export interface DropoffRequestsListResponse {
 export interface RouteAssignmentsListResponse {
   assignments: RouteAssignment[];
   pagination: Pagination;
+}
+
+export interface EmployeeProfileResponse {
+  user_id: number;
+  employee_id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  home_lat?: number;
+  home_lng?: number;
+  role: string;
+  status: string;
+  is_active: boolean;
+}
+
+export interface EmployeeProfileUpdate {
+  name?: string;
+  phone?: string;
+  home_lat?: number;
+  home_lng?: number;
+}
+
+export interface StopInfo {
+  stop_id: number;
+  sequence_order?: number;
+  latitude?: number;
+  longitude?: number;
+  arrival_time?: string;
+}
+
+export interface DriverInfo {
+  driver_id: number;
+  name?: string;
+  phone?: string;
+}
+
+export interface VehicleInfo {
+  vehicle_id: number;
+  plate_no?: string;
+  capacity?: number;
+}
+
+export interface ScheduleResponse {
+  service_date: string;
+  route_id?: number;
+  route_type?: string;
+  shift_time?: string;
+  stop?: StopInfo;
+  driver?: DriverInfo;
+  vehicle?: VehicleInfo;
+  routing_done: boolean;
 }
