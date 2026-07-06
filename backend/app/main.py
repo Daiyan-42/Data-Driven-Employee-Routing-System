@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import (
     auth,
+    admin
     drivers,
     dropoff_requests,
     employees,
@@ -28,10 +29,12 @@ app.add_middleware(
 # Routers
 app.include_router(auth.router)
 app.include_router(drivers.router)
+
 app.include_router(vehicles.router)
 app.include_router(drivers_me.router)
 app.include_router(pickup_requests.router)
 app.include_router(dropoff_requests.router)
+app.include_router(admin.router)
 app.include_router(employees.router)
 
 
