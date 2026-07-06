@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { Bus, Mail, Lock, Eye, EyeOff, UserCircle, Truck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { mockUsers } from '../../data/mockData';
+import { authApi } from '../../services/transportApi';
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -18,18 +19,26 @@ export const LoginPage: React.FC = () => {
     setError('');
     setLoading(true);
 
-    await new Promise(r => setTimeout(r, 600));
+    try {
+      const data = await authApi.login({ email, password });
+      if (data.user.role === 'Admin') {
+        throw new Error('Use the admin login page for admin accounts.');
+      }
 
-    const user = mockUsers.find(u => u.email === email && u.password === password && u.role !== 'admin');
-
-    if (user) {
-      login(user);
-      if (user.role === 'employee') navigate('/employee/profile');
-      else navigate('/driver/profile');
-    } else {
-      setError('Invalid email or password. Contact your admin if you need access.');
+      const role = data.user.role === 'Driver' ? 'driver' : 'employee';
+      login({
+        id: String(data.user.user_id),
+        name: data.user.name,
+        email: data.user.email,
+        phone: data.user.phone ?? '',
+        role,
+      });
+      navigate(role === 'employee' ? '/employee/profile' : '/driver/profile');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid email or password. Contact your admin if you need access.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const quickLogin = (role: 'employee' | 'driver') => {

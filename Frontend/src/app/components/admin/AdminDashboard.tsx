@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Users, Car, Truck, ClipboardList, Route, LogOut,
@@ -10,8 +10,10 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import {
   mockUsers, mockVehicles, mockDrivers, mockRequests,
-  User, Vehicle, Driver, Request,
+  User,
 } from '../../data/mockData';
+import { driverApi, dropoffRequestApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
+import type { Driver, DropoffRequest, Vehicle } from '../../types/api';
 
 type AdminView = 'overview' | 'employees' | 'drivers' | 'vehicles' | 'requests' | 'routing';
 
@@ -42,6 +44,36 @@ export const AdminDashboard: React.FC = () => {
   const [routingShift, setRoutingShift] = useState('07:00');
   const [routingDate, setRoutingDate] = useState('2026-07-07');
   const [isRouting, setIsRouting] = useState(false);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [dropoffRequests, setDropoffRequests] = useState<DropoffRequest[]>([]);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [pickupActionId, setPickupActionId] = useState('');
+  const [requestActionLoading, setRequestActionLoading] = useState(false);
+
+  const loadAdminApiData = async () => {
+    setApiLoading(true);
+    setApiError(null);
+    try {
+      const [driverRes, vehicleRes, dropoffRes] = await Promise.all([
+        driverApi.list({ page: 1, limit: 100 }),
+        vehicleApi.list({ page: 1, limit: 100 }),
+        dropoffRequestApi.list({ page: 1, limit: 100 }),
+      ]);
+      setDrivers(driverRes.drivers);
+      setVehicles(vehicleRes.vehicles);
+      setDropoffRequests(dropoffRes.dropoff_requests);
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not load backend data.');
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAdminApiData();
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -49,9 +81,9 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const totalEmployees = employees.length;
-  const totalDrivers = mockDrivers.length;
-  const totalVehicles = mockVehicles.length;
-  const pendingRequests = mockRequests.filter(r => r.status === 'pending').length;
+  const totalDrivers = drivers.length;
+  const totalVehicles = vehicles.length;
+  const pendingRequests = dropoffRequests.filter(r => r.status === 'Pending').length;
   const routedRequests = mockRequests.filter(r => r.status === 'routed').length;
 
   const filteredRequests = mockRequests.filter(r => {
@@ -62,6 +94,60 @@ export const AdminDashboard: React.FC = () => {
 
   const uniqueShifts = [...new Set(mockRequests.map(r => r.shiftTime))];
   const uniqueDates = [...new Set(mockRequests.map(r => r.serviceDate))];
+  const filteredDropoffRequests = dropoffRequests.filter(r => {
+    const matchDate = selectedDateFilter === 'all' || r.service_date === selectedDateFilter;
+    return matchDate;
+  });
+  const uniqueDropoffDates = [...new Set(dropoffRequests.map(r => r.service_date))];
+
+  const approveDropoff = async (dropoffId: number) => {
+    setRequestActionLoading(true);
+    setApiError(null);
+    try {
+      await dropoffRequestApi.approve(dropoffId);
+      await loadAdminApiData();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not approve dropoff request.');
+    } finally {
+      setRequestActionLoading(false);
+    }
+  };
+
+  const rejectDropoff = async (dropoffId: number) => {
+    setRequestActionLoading(true);
+    setApiError(null);
+    try {
+      await dropoffRequestApi.reject(dropoffId);
+      await loadAdminApiData();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not reject dropoff request.');
+    } finally {
+      setRequestActionLoading(false);
+    }
+  };
+
+  const updatePickupStatus = async (action: 'approve' | 'reject') => {
+    const id = Number(pickupActionId);
+    if (!id) {
+      setApiError('Enter a valid pickup request ID.');
+      return;
+    }
+
+    setRequestActionLoading(true);
+    setApiError(null);
+    try {
+      if (action === 'approve') {
+        await pickupRequestApi.approve(id);
+      } else {
+        await pickupRequestApi.reject(id);
+      }
+      setPickupActionId('');
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : `Could not ${action} pickup request.`);
+    } finally {
+      setRequestActionLoading(false);
+    }
+  };
 
   // Simulated routing algorithm
   const runRoutingAlgorithm = async () => {
@@ -233,6 +319,17 @@ export const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="p-8">
+          {apiError && (
+            <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              {apiError}
+            </div>
+          )}
+          {apiLoading && (
+            <div className="mb-4 rounded-lg border border-sky-500/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-300">
+              Loading backend data...
+            </div>
+          )}
+
           {/* ─── OVERVIEW ─── */}
           {view === 'overview' && (
             <div className="space-y-8">
@@ -273,15 +370,15 @@ export const AdminDashboard: React.FC = () => {
                 <div className="rounded-xl border border-white/8 bg-card p-6">
                   <h3 className="text-base font-semibold text-white mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Fleet Status</h3>
                   <div className="space-y-3">
-                    {mockVehicles.map(v => {
-                      const driver = mockDrivers.find(d => d.vehicleId === v.id);
+                    {vehicles.map(v => {
+                      const driver = v.driver_name;
                       return (
-                        <div key={v.id} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
+                        <div key={v.vehicle_id} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
                           <div className="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/15 flex items-center justify-center">
                             <Bus className="w-4 h-4 text-sky-400" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm text-white font-medium">{v.plateNumber}</p>
+                            <p className="text-sm text-white font-medium">{v.plate_no}</p>
                             <p className="text-xs text-slate-600">{v.model} · {v.capacity} seats</p>
                           </div>
                           <div className="text-right">
@@ -401,10 +498,10 @@ export const AdminDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockDrivers.map((drv, i) => {
-                    const vehicle = mockVehicles.find(v => v.id === drv.vehicleId);
+                  {drivers.map((drv, i) => {
+                    const vehicle = vehicles.find(v => v.driver_id === drv.driver_id);
                     return (
-                      <tr key={drv.id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
+                      <tr key={drv.driver_id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center text-xs font-bold text-emerald-400">
@@ -413,12 +510,12 @@ export const AdminDashboard: React.FC = () => {
                             <span className="text-sm font-medium text-white">{drv.name}</span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{drv.licenseNumber}</td>
-                        <td className="px-6 py-4 text-sm text-slate-400">{drv.experience}</td>
+                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{drv.license_no}</td>
+                        <td className="px-6 py-4 text-sm text-slate-400">{drv.status}</td>
                         <td className="px-6 py-4">
                           {vehicle ? (
                             <div>
-                              <p className="text-sm text-sky-400 font-medium">{vehicle.plateNumber}</p>
+                              <p className="text-sm text-sky-400 font-medium">{vehicle.plate_no}</p>
                               <p className="text-xs text-slate-600">{vehicle.model} · {vehicle.type}</p>
                             </div>
                           ) : <span className="text-slate-600 text-sm">Unassigned</span>}
@@ -450,23 +547,23 @@ export const AdminDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockVehicles.map((v, i) => {
-                    const driver = mockDrivers.find(d => d.vehicleId === v.id);
+                  {vehicles.map((v, i) => {
+                    const driver = drivers.find(d => d.driver_id === v.driver_id);
                     return (
-                      <tr key={v.id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
+                      <tr key={v.vehicle_id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/15 flex items-center justify-center">
                               <Bus className="w-4 h-4 text-sky-400" />
                             </div>
                             <div>
-                              <p className="text-sm font-medium text-white">{v.model}</p>
-                              <p className="text-xs text-slate-600">{v.color}</p>
+                              <p className="text-sm font-medium text-white">{v.plate_no}</p>
+                              <p className="text-xs text-slate-600">{v.status}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-amber-400 font-mono font-medium">{v.plateNumber}</td>
-                        <td className="px-6 py-4 text-sm text-slate-400">{v.type}</td>
+                        <td className="px-6 py-4 text-sm text-amber-400 font-mono font-medium">{v.plate_no}</td>
+                        <td className="px-6 py-4 text-sm text-slate-400">Vehicle</td>
                         <td className="px-6 py-4 text-sm text-slate-400">{v.capacity} seats</td>
                         <td className="px-6 py-4 text-sm text-slate-400">{driver?.name || <span className="text-slate-600">—</span>}</td>
                         <td className="px-6 py-4">
@@ -488,7 +585,7 @@ export const AdminDashboard: React.FC = () => {
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Filter className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm text-slate-500">Filter by:</span>
+                  <span className="text-sm text-slate-500">Dropoff date:</span>
                 </div>
                 <select
                   value={selectedDateFilter}
@@ -496,17 +593,35 @@ export const AdminDashboard: React.FC = () => {
                   className="px-3 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                 >
                   <option value="all">All Dates</option>
-                  {uniqueDates.map(d => <option key={d} value={d}>{d}</option>)}
+                  {uniqueDropoffDates.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                <select
-                  value={selectedShiftFilter}
-                  onChange={e => setSelectedShiftFilter(e.target.value)}
-                  className="px-3 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
+                <span className="text-xs text-slate-600 ml-auto">{filteredDropoffRequests.length} dropoff requests</span>
+              </div>
+
+              <div className="rounded-xl border border-white/8 bg-card p-4 flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Pickup ID</label>
+                  <input
+                    value={pickupActionId}
+                    onChange={e => setPickupActionId(e.target.value)}
+                    placeholder="e.g. 12"
+                    className="w-36 px-3 py-2 rounded-lg border border-white/8 bg-white/4 text-white placeholder:text-slate-700 text-sm focus:outline-none focus:border-sky-500/40 transition"
+                  />
+                </div>
+                <button
+                  onClick={() => updatePickupStatus('approve')}
+                  disabled={requestActionLoading}
+                  className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold transition disabled:opacity-60"
                 >
-                  <option value="all">All Shift Times</option>
-                  {uniqueShifts.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <span className="text-xs text-slate-600 ml-auto">{filteredRequests.length} requests</span>
+                  Approve Pickup
+                </button>
+                <button
+                  onClick={() => updatePickupStatus('reject')}
+                  disabled={requestActionLoading}
+                  className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-400 text-white text-sm font-semibold transition disabled:opacity-60"
+                >
+                  Reject Pickup
+                </button>
               </div>
 
               <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
@@ -519,44 +634,54 @@ export const AdminDashboard: React.FC = () => {
                       <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
                       <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Shift</th>
                       <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                      <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Assigned</th>
+                      <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRequests.map((r, i) => (
-                      <tr key={r.id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
-                        <td className="px-6 py-4 text-sm text-white font-medium">{r.employeeName}</td>
+                    {filteredDropoffRequests.map((r, i) => (
+                      <tr key={r.dropoff_id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
+                        <td className="px-6 py-4 text-sm text-white font-medium">{r.employee_name || `Employee #${r.employee_id}`}</td>
                         <td className="px-6 py-4">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${r.type === 'pickup' ? 'bg-sky-500/15 text-sky-400' : r.type === 'dropoff' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-purple-500/15 text-purple-400'}`}>
-                            {r.type}
-                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">dropoff</span>
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-400 max-w-[180px] truncate">{r.location}</td>
-                        <td className="px-6 py-4 text-xs text-slate-400">{r.serviceDate}</td>
-                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{r.shiftTime}</td>
+                        <td className="px-6 py-4 text-xs text-slate-400 max-w-[180px] truncate">
+                          {r.zone_name || `${r.drop_lat ?? '—'}, ${r.drop_lng ?? '—'}`}
+                        </td>
+                        <td className="px-6 py-4 text-xs text-slate-400">{r.service_date}</td>
+                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{r.shift_end_time || '—'}</td>
                         <td className="px-6 py-4">
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            r.status === 'routed' ? 'bg-emerald-500/15 text-emerald-400'
-                            : r.status === 'pending' ? 'bg-amber-500/15 text-amber-400'
+                            r.status === 'Approved' ? 'bg-emerald-500/15 text-emerald-400'
+                            : r.status === 'Pending' ? 'bg-amber-500/15 text-amber-400'
                             : 'bg-red-500/15 text-red-400'
                           }`}>
                             {r.status}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-xs text-slate-500">
-                          {r.assignedDriver ? (
-                            <div>
-                              <p className="text-slate-300">{r.assignedDriver}</p>
-                              <p className="text-slate-600">{r.assignedVehicle}</p>
-                            </div>
-                          ) : '—'}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => approveDropoff(r.dropoff_id)}
+                              disabled={requestActionLoading || r.status !== 'Pending'}
+                              className="px-2 py-1 rounded bg-emerald-500/15 text-emerald-400 disabled:opacity-40"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => rejectDropoff(r.dropoff_id)}
+                              disabled={requestActionLoading || r.status !== 'Pending'}
+                              className="px-2 py-1 rounded bg-red-500/15 text-red-400 disabled:opacity-40"
+                            >
+                              Reject
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {filteredRequests.length === 0 && (
-                  <div className="text-center py-12 text-slate-600">No requests match the filters.</div>
+                {filteredDropoffRequests.length === 0 && (
+                  <div className="text-center py-12 text-slate-600">No dropoff requests match the filters.</div>
                 )}
               </div>
             </div>
