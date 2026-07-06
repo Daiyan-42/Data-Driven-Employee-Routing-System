@@ -1,22 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Sidebar } from '../shared/Sidebar';
-import { MapPin, Calendar, Clock, Send, CheckCircle, Car, ArrowRight, ArrowLeft, Info } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { TimePicker } from '../ui/time-picker';
+import {
+  MapPin, Clock, Send, CheckCircle, ArrowRight, ArrowLeft,
+  Info, Calendar, AlertTriangle, Lock,
+} from 'lucide-react';
 import { InteractiveMap } from '../shared/InteractiveMap';
 import { useAuth } from '../../context/AuthContext';
-import { pickupRequestApi } from '../../services/transportApi';
 
-const WEEKDAYS = [
-  { id: 'monday', label: 'Monday' },
-  { id: 'tuesday', label: 'Tuesday' },
-  { id: 'wednesday', label: 'Wednesday' },
-  { id: 'thursday', label: 'Thursday' },
-  { id: 'friday', label: 'Friday' },
+const ALL_DAYS = [
+  { id: 'sunday', label: 'Sun', full: 'Sunday' },
+  { id: 'monday', label: 'Mon', full: 'Monday' },
+  { id: 'tuesday', label: 'Tue', full: 'Tuesday' },
+  { id: 'wednesday', label: 'Wed', full: 'Wednesday' },
+  { id: 'thursday', label: 'Thu', full: 'Thursday' },
+  { id: 'friday', label: 'Fri', full: 'Friday' },
+  { id: 'saturday', label: 'Sat', full: 'Saturday' },
 ];
+
+const SHIFT_OPTIONS = ['07:00', '10:00', '13:00', '16:00', '19:00', '22:00'];
+
+// Dhaka city center
+const DHAKA_CENTER: [number, number] = [23.7808, 90.4043];
 
 interface DaySchedule {
   day: string;
@@ -26,209 +30,120 @@ interface DaySchedule {
   shiftTime: string;
 }
 
+// Deadline: Friday midnight to Saturday midnight (Sun–Thu window only)
+const isWithinDeadline = () => {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun, 5=Fri, 6=Sat
+  return day !== 5 && day !== 6; // Fri & Sat are deadline window — submission allowed
+};
+
+const deadlinePassed = () => {
+  const now = new Date();
+  const day = now.getDay();
+  return day !== 5 && day !== 6;
+};
+
 export const PickupRequestForm: React.FC = () => {
   const { user } = useAuth();
-  const [currentStep, setCurrentStep] = useState(0);
+  const [selectedDays, setSelectedDays] = useState<string[]>(['monday']);
+  const [currentDayIdx, setCurrentDayIdx] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  const [schedules, setSchedules] = useState<DaySchedule[]>(
-    WEEKDAYS.map(day => ({
-      day: day.id,
-      location: user?.address || '',
-      latitude: user?.latitude || 40.7128,
-      longitude: user?.longitude || -74.0060,
-      shiftTime: '',
-    }))
+  const [step, setStep] = useState<'days' | 'details' | 'success'>('days');
+
+  const [schedules, setSchedules] = useState<Record<string, DaySchedule>>(
+    Object.fromEntries(
+      ALL_DAYS.map(d => [
+        d.id,
+        {
+          day: d.id,
+          location: user?.address || '',
+          latitude: user?.latitude || DHAKA_CENTER[0],
+          longitude: user?.longitude || DHAKA_CENTER[1],
+          shiftTime: '07:00',
+        },
+      ])
+    )
   );
 
-  const currentSchedule = schedules[currentStep];
+  const withinDeadline = !deadlinePassed(); // flip: deadline open on Fri/Sat
 
-  // Mock assignment data (shown after submission)
-  const assignedInfo = {
-    vehiclePlate: 'ABC-1234',
-    driverName: 'Sarah Wilson',
-    driverPhone: '+1-555-0202',
-    vehicleType: 'Van',
-    seatsAvailable: '8',
+  const toggleDay = (day: string) => {
+    setSelectedDays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    );
   };
+
+  const currentDay = selectedDays[currentDayIdx];
+  const currentSchedule = schedules[currentDay] || null;
 
   const handleLocationSelect = (lat: number, lng: number) => {
-    setSchedules(prev => prev.map((schedule, idx) =>
-      idx === currentStep
-        ? { ...schedule, latitude: lat, longitude: lng }
-        : schedule
-    ));
+    if (!currentDay) return;
+    setSchedules(prev => ({
+      ...prev,
+      [currentDay]: { ...prev[currentDay], latitude: lat, longitude: lng, location: `${lat.toFixed(5)}, ${lng.toFixed(5)}` },
+    }));
   };
 
-  const handleInputChange = (field: keyof DaySchedule, value: string) => {
-    setSchedules(prev => prev.map((schedule, idx) =>
-      idx === currentStep
-        ? { ...schedule, [field]: value }
-        : schedule
-    ));
-  };
-
-  const handleNext = () => {
-    if (currentStep < WEEKDAYS.length - 1) {
-      setCurrentStep(currentStep + 1);
-    }
-  };
-
-  const handlePrevious = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
-    }
+  const handleFieldChange = (field: keyof DaySchedule, value: string) => {
+    if (!currentDay) return;
+    setSchedules(prev => ({ ...prev, [currentDay]: { ...prev[currentDay], [field]: value } }));
   };
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
-
-    await pickupRequestApi.submitWeeklyRegular({
-      employeeId: user?.id ?? '1',
-      schedules,
-    });
-
+    await new Promise(r => setTimeout(r, 1200));
     setIsSubmitting(false);
-    setSubmitted(true);
+    setStep('success');
   };
 
-  const isCurrentDayValid = currentSchedule.location && currentSchedule.shiftTime;
-  const allDaysValid = schedules.every(s => s.location && s.shiftTime);
-
-  if (submitted) {
+  if (!withinDeadline) {
     return (
       <Sidebar role="employee">
-        <div className="p-6 max-w-6xl mx-auto">
-          {/* Success Message */}
-          <div className="mb-8">
-            <div className="bg-green-50 border-2 border-green-200 rounded-lg p-6 mb-6">
-              <div className="flex items-start gap-4">
-                <div className="bg-green-500 rounded-full p-3">
-                  <CheckCircle className="w-8 h-8 text-white" />
-                </div>
-                <div className="flex-1">
-                  <h2 className="text-2xl font-bold text-green-900 mb-2">
-                    Weekly Pickup Requests Submitted!
-                  </h2>
-                  <p className="text-green-700">
-                    Your pickup requests for all 5 days have been approved and vehicles have been assigned.
-                  </p>
-                </div>
-              </div>
+        <div className="p-8 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[70vh]">
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/8 p-10 text-center max-w-md">
+            <div className="w-14 h-14 rounded-full bg-amber-500/15 border border-amber-500/20 flex items-center justify-center mx-auto mb-5">
+              <Lock className="w-7 h-7 text-amber-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+              Submission Window Closed
+            </h2>
+            <p className="text-slate-400 text-sm leading-relaxed">
+              Pickup requests for the upcoming week can only be submitted on <span className="text-amber-400 font-medium">Friday and Saturday</span>.
+              The next submission window opens this Friday.
+            </p>
+            <div className="mt-6 px-4 py-2.5 rounded-lg bg-white/4 border border-white/8 text-xs text-slate-500 font-mono">
+              Next window: Friday 00:00 — Saturday 23:59
             </div>
           </div>
+        </div>
+      </Sidebar>
+    );
+  }
 
-          {/* Weekly Schedule Summary */}
-          <Card className="border-0 shadow-lg mb-6">
-            <CardHeader className="border-b border-gray-100 bg-blue-50">
-              <CardTitle>Weekly Schedule Summary</CardTitle>
-              <CardDescription>Your pickup service schedule for each day</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                {schedules.map((schedule, index) => {
-                  const day = WEEKDAYS[index];
-                  const pickupTime = schedule.shiftTime ? 
-                    `${String(parseInt(schedule.shiftTime.split(':')[0]) - 1).padStart(2, '0')}:${schedule.shiftTime.split(':')[1]}` 
-                    : '07:45';
-                  
-                  return (
-                    <div key={day.id} className="bg-gray-50 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="font-semibold text-lg text-gray-900">{day.label}</h3>
-                        <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-medium">
-                          Pickup: {pickupTime}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs text-gray-600 mb-1">Pickup Location</p>
-                          <p className="text-sm font-medium text-gray-900">{schedule.location}</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {schedule.latitude.toFixed(6)}, {schedule.longitude.toFixed(6)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600 mb-1">Shift Start Time</p>
-                          <p className="text-sm font-medium text-gray-900">{schedule.shiftTime}</p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Assigned Vehicle Info */}
-          <Card className="border-0 shadow-lg mb-6">
-            <CardHeader className="border-b border-gray-100 bg-blue-50">
-              <CardTitle className="flex items-center gap-2">
-                <Car className="w-6 h-6 text-blue-600" />
-                Assigned Vehicle Information
-              </CardTitle>
-              <CardDescription>Details about your assigned pickup service</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-                  <div className="bg-blue-100 rounded-lg p-3">
-                    <Car className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Vehicle Plate</p>
-                    <p className="font-bold text-xl text-gray-900">{assignedInfo.vehiclePlate}</p>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-2">Driver Information</p>
-                  <p className="font-semibold text-gray-900">{assignedInfo.driverName}</p>
-                  <p className="text-sm text-gray-600">{assignedInfo.driverPhone}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Route Map for All Days */}
-          <Card className="border-0 shadow-lg mb-6">
-            <CardHeader className="border-b border-gray-100">
-              <CardTitle>All Pickup Locations</CardTitle>
-              <CardDescription>Map view of all your weekly pickup locations</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6">
-              <InteractiveMap
-                center={[schedules[0].latitude, schedules[0].longitude]}
-                markers={schedules.map((schedule, idx) => ({
-                  position: [schedule.latitude, schedule.longitude] as [number, number],
-                  label: `${WEEKDAYS[idx].label} - ${schedule.location}`,
-                  color: '#2563EB',
-                }))}
-                showRoute={false}
-                height="500px"
-              />
-            </CardContent>
-          </Card>
-
-          {/* Action Buttons */}
-          <div className="flex gap-4">
-            <Button
-              variant="outline"
-              className="flex-1 hover:bg-gray-100 transition-colors"
-              onClick={() => {
-                setSubmitted(false);
-                setCurrentStep(0);
-              }}
+  if (step === 'success') {
+    return (
+      <Sidebar role="employee">
+        <div className="p-8 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[70vh]">
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-10 text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center mx-auto mb-5">
+              <CheckCircle className="w-8 h-8 text-emerald-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+              Requests Submitted!
+            </h2>
+            <p className="text-slate-400 text-sm leading-relaxed mb-2">
+              Pickup requests for <span className="text-white font-medium">{selectedDays.length} day(s)</span> have been submitted.
+            </p>
+            <p className="text-xs text-slate-600">
+              You will be notified once routes are assigned. Check <strong className="text-slate-400">My Requests</strong> for status.
+            </p>
+            <button
+              onClick={() => { setStep('days'); setSelectedDays(['monday']); setCurrentDayIdx(0); }}
+              className="mt-6 px-6 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-sm font-semibold transition"
             >
-              Submit Another Request
-            </Button>
-            <Button
-              className="flex-1 bg-blue-600 hover:bg-blue-700 transition-colors"
-              onClick={() => window.location.href = '/employee/dashboard'}
-            >
-              Back to Dashboard
-            </Button>
+              Submit Another Week
+            </button>
           </div>
         </div>
       </Sidebar>
@@ -240,180 +155,205 @@ export const PickupRequestForm: React.FC = () => {
       <div className="p-6 max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Weekly Pickup Service Request</h1>
-          <p className="text-gray-600 mt-1">Set up your pickup location and time for each day of the week</p>
+          <h1 className="text-3xl font-bold text-white mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+            Pickup Request
+          </h1>
+          <p className="text-slate-500 text-sm">Select your shift days and enter pickup locations for each.</p>
         </div>
 
-        {/* Progress Indicator */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            {WEEKDAYS.map((day, index) => (
-              <div key={day.id} className="flex items-center flex-1">
-                <div className="flex flex-col items-center flex-1">
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all ${
-                      index === currentStep
-                        ? 'bg-blue-600 text-white ring-4 ring-blue-100'
-                        : index < currentStep || (schedules[index].location && schedules[index].shiftTime)
-                        ? 'bg-green-500 text-white'
-                        : 'bg-gray-200 text-gray-600'
+        {/* Deadline notice */}
+        <div className="flex items-start gap-3 rounded-xl border border-sky-500/15 bg-sky-500/8 px-5 py-4 mb-6">
+          <Info className="w-4 h-4 text-sky-400 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-sky-300/80">
+            Pickup requests for next week must be submitted by <span className="font-semibold text-sky-300">Saturday midnight</span>.
+            Late submissions will not be accepted.
+          </p>
+        </div>
+
+        {step === 'days' && (
+          <div className="space-y-6">
+            {/* Day selector */}
+            <div className="rounded-xl border border-white/8 bg-card p-6">
+              <h3 className="text-base font-semibold text-white mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                Which days do you have a shift?
+              </h3>
+              <div className="flex gap-3 flex-wrap">
+                {ALL_DAYS.map(d => {
+                  const selected = selectedDays.includes(d.id);
+                  return (
+                    <button
+                      key={d.id}
+                      onClick={() => toggleDay(d.id)}
+                      className={`px-5 py-3 rounded-xl text-sm font-semibold transition-all border ${
+                        selected
+                          ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+                          : 'border-white/8 bg-white/4 text-slate-500 hover:text-slate-300 hover:border-white/15'
+                      }`}
+                    >
+                      {d.full}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedDays.length === 0 && (
+                <p className="text-xs text-amber-400 mt-3 flex items-center gap-2">
+                  <AlertTriangle className="w-3 h-3" /> Select at least one day.
+                </p>
+              )}
+            </div>
+
+            <button
+              disabled={selectedDays.length === 0}
+              onClick={() => { setCurrentDayIdx(0); setStep('details'); }}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Set Locations
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {step === 'details' && currentSchedule && (
+          <div className="space-y-6">
+            {/* Day tabs */}
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {selectedDays.map((d, i) => {
+                const dayInfo = ALL_DAYS.find(x => x.id === d)!;
+                const active = i === currentDayIdx;
+                const filled = schedules[d]?.location && schedules[d]?.shiftTime;
+                return (
+                  <button
+                    key={d}
+                    onClick={() => setCurrentDayIdx(i)}
+                    className={`flex-shrink-0 px-4 py-2.5 rounded-lg text-sm font-medium transition border ${
+                      active
+                        ? 'bg-sky-500/20 border-sky-500/30 text-sky-300'
+                        : 'border-white/8 bg-white/4 text-slate-500 hover:text-slate-300'
                     }`}
                   >
-                    {index < currentStep || (schedules[index].location && schedules[index].shiftTime) ? (
-                      <CheckCircle className="w-5 h-5" />
-                    ) : (
-                      index + 1
-                    )}
-                  </div>
-                  <p className={`text-xs mt-2 font-medium ${index === currentStep ? 'text-blue-600' : 'text-gray-600'}`}>
-                    {day.label.slice(0, 3)}
-                  </p>
-                </div>
-                {index < WEEKDAYS.length - 1 && (
-                  <div
-                    className={`flex-1 h-1 mx-2 rounded transition-all ${
-                      index < currentStep ? 'bg-green-500' : 'bg-gray-200'
-                    }`}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+                    {dayInfo.full}
+                    {filled && <span className="ml-2 w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />}
+                  </button>
+                );
+              })}
+            </div>
 
-        {/* Form Card */}
-        <Card className="border-0 shadow-lg mb-6">
-          <CardHeader className="border-b border-gray-100 bg-blue-50">
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="w-6 h-6 text-blue-600" />
-              {WEEKDAYS[currentStep].label} Pickup Details
-            </CardTitle>
-            <CardDescription>
-              Configure pickup location and shift time for {WEEKDAYS[currentStep].label}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-6">
-            <div className="space-y-6">
-              {/* Interactive Map */}
-              <div>
-                <Label className="mb-2 block">Select Pickup Location on Map</Label>
-                <p className="text-sm text-gray-600 mb-3">Click anywhere on the map to set your pickup location</p>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Map */}
+              <div className="rounded-xl border border-white/8 bg-card p-5">
+                <h3 className="text-sm font-semibold text-white mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                  Pick location on map
+                </h3>
+                <p className="text-xs text-slate-600 mb-4">Click anywhere on the Dhaka city map to set your pickup point.</p>
                 <InteractiveMap
                   center={[currentSchedule.latitude, currentSchedule.longitude]}
-                  markers={[
-                    {
-                      position: [currentSchedule.latitude, currentSchedule.longitude] as [number, number],
-                      label: currentSchedule.location || 'Selected Location',
-                      color: '#2563EB',
-                    },
-                  ]}
+                  zoom={13}
                   onLocationSelect={handleLocationSelect}
-                  height="400px"
+                  markers={
+                    currentSchedule.location
+                      ? [{ position: [currentSchedule.latitude, currentSchedule.longitude], label: 'Pickup', color: '#0EA5E9' }]
+                      : []
+                  }
+                  height="420px"
                 />
               </div>
 
-              {/* Location Address */}
-              <div className="space-y-2">
-                <Label htmlFor="location">Pickup Location Address *</Label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    id="location"
-                    value={currentSchedule.location}
-                    onChange={(e) => handleInputChange('location', e.target.value)}
-                    className="pl-10"
-                    placeholder="Enter your pickup location address"
-                    required
-                  />
+              {/* Form */}
+              <div className="rounded-xl border border-white/8 bg-card p-5 space-y-5">
+                <div className="flex items-center gap-2 pb-4 border-b border-white/8">
+                  <Calendar className="w-4 h-4 text-sky-400" />
+                  <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                    {ALL_DAYS.find(d => d.id === currentDay)?.full} — Details
+                  </h3>
                 </div>
-              </div>
 
-              {/* Coordinates Display */}
-              <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                <p className="text-sm font-medium text-blue-900 mb-3">Selected Coordinates</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-xs text-blue-700">Latitude</Label>
-                    <Input
-                      type="text"
-                      value={currentSchedule.latitude.toFixed(6)}
-                      readOnly
-                      className="bg-white border-blue-200"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-blue-700">Longitude</Label>
-                    <Input
-                      type="text"
-                      value={currentSchedule.longitude.toFixed(6)}
-                      readOnly
-                      className="bg-white border-blue-200"
+                <div>
+                  <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Shift Time</label>
+                  <select
+                    value={currentSchedule.shiftTime}
+                    onChange={e => handleFieldChange('shiftTime', e.target.value)}
+                    className="w-full px-3 py-3 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
+                  >
+                    {SHIFT_OPTIONS.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Pickup Address</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-600" />
+                    <textarea
+                      value={currentSchedule.location}
+                      onChange={e => handleFieldChange('location', e.target.value)}
+                      placeholder="Type your full address, or click on the map…"
+                      rows={3}
+                      className="w-full pl-9 pr-4 py-3 rounded-lg border border-white/8 bg-white/4 text-white placeholder:text-slate-700 text-sm focus:outline-none focus:border-sky-500/40 transition resize-none"
                     />
                   </div>
                 </div>
-              </div>
 
-              {/* Shift Start Time */}
-              <TimePicker
-                value={currentSchedule.shiftTime}
-                onChange={(time) => handleInputChange('shiftTime', time)}
-                label="Shift Start Time"
-                required
-              />
+                {currentSchedule.latitude !== DHAKA_CENTER[0] && (
+                  <div className="flex items-center gap-2 rounded-lg bg-emerald-500/8 border border-emerald-500/15 px-3 py-2.5">
+                    <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    <div className="text-xs">
+                      <p className="text-emerald-300 font-medium">Location pinned on map</p>
+                      <p className="text-slate-600 font-mono">
+                        {currentSchedule.latitude.toFixed(5)}, {currentSchedule.longitude.toFixed(5)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Navigation */}
+                <div className="flex gap-3 pt-2">
+                  {currentDayIdx > 0 && (
+                    <button
+                      onClick={() => setCurrentDayIdx(i => i - 1)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-white/10 text-slate-400 hover:text-white hover:border-white/20 text-sm transition"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      {ALL_DAYS.find(d => d.id === selectedDays[currentDayIdx - 1])?.full}
+                    </button>
+                  )}
+                  {currentDayIdx < selectedDays.length - 1 ? (
+                    <button
+                      onClick={() => setCurrentDayIdx(i => i + 1)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-sky-500/15 border border-sky-500/25 text-sky-300 hover:bg-sky-500/25 text-sm transition ml-auto"
+                    >
+                      {ALL_DAYS.find(d => d.id === selectedDays[currentDayIdx + 1])?.full}
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleSubmit}
+                      disabled={isSubmitting}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm transition disabled:opacity-60 ml-auto"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          Submit All
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => setStep('days')}
+                  className="text-xs text-slate-600 hover:text-slate-400 transition"
+                >
+                  ← Change selected days
+                </button>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Navigation Buttons */}
-        <div className="flex gap-4">
-          <Button
-            variant="outline"
-            onClick={handlePrevious}
-            disabled={currentStep === 0}
-            className="flex items-center gap-2"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            Previous Day
-          </Button>
-          
-          <div className="flex-1" />
-
-          {currentStep < WEEKDAYS.length - 1 ? (
-            <Button
-              onClick={handleNext}
-              disabled={!isCurrentDayValid}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
-            >
-              Next Day
-              <ArrowRight className="w-5 h-5" />
-            </Button>
-          ) : (
-            <Button
-              onClick={handleSubmit}
-              disabled={!allDaysValid || isSubmitting}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 transition-all hover:scale-[1.02] active:scale-[0.98]"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                <>
-                  <Send className="w-5 h-5" />
-                  Submit All Requests
-                </>
-              )}
-            </Button>
-          )}
-        </div>
-
-        {/* Info Message */}
-        {!allDaysValid && (
-          <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-4">
-            <p className="text-sm text-orange-800">
-              Please complete all {WEEKDAYS.length} days before submitting. Days completed: {schedules.filter(s => s.location && s.shiftTime).length}/{WEEKDAYS.length}
-            </p>
           </div>
         )}
       </div>

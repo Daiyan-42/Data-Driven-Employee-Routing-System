@@ -2,80 +2,78 @@
 
 :root {
   --font-size: 16px;
-  --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
-  --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
-  --accent-foreground: #030213;
-  --destructive: #d4183d;
+  --background: #0B0F1A;
+  --foreground: #E8EDF5;
+  --card: #131929;
+  --card-foreground: #E8EDF5;
+  --popover: #1A2235;
+  --popover-foreground: #E8EDF5;
+  --primary: #0EA5E9;
+  --primary-foreground: #ffffff;
+  --secondary: #1E2A40;
+  --secondary-foreground: #94A3B8;
+  --muted: #1A2235;
+  --muted-foreground: #64748B;
+  --accent: #F59E0B;
+  --accent-foreground: #0B0F1A;
+  --destructive: #EF4444;
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --input: transparent;
-  --input-background: #f3f3f5;
-  --switch-background: #cbced4;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: #1E2A40;
+  --input-background: #1E2A40;
+  --switch-background: #2D3E58;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --ring: #0EA5E9;
+  --chart-1: #0EA5E9;
+  --chart-2: #10B981;
+  --chart-3: #F59E0B;
+  --chart-4: #8B5CF6;
+  --chart-5: #EF4444;
+  --radius: 0.5rem;
+  --sidebar: #0D1320;
+  --sidebar-foreground: #E8EDF5;
+  --sidebar-primary: #0EA5E9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1A2639;
+  --sidebar-accent-foreground: #E8EDF5;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: #0EA5E9;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --background: #0B0F1A;
+  --foreground: #E8EDF5;
+  --card: #131929;
+  --card-foreground: #E8EDF5;
+  --popover: #1A2235;
+  --popover-foreground: #E8EDF5;
+  --primary: #0EA5E9;
+  --primary-foreground: #ffffff;
+  --secondary: #1E2A40;
+  --secondary-foreground: #94A3B8;
+  --muted: #1A2235;
+  --muted-foreground: #64748B;
+  --accent: #F59E0B;
+  --accent-foreground: #0B0F1A;
+  --destructive: #EF4444;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: #1E2A40;
+  --ring: #0EA5E9;
+  --chart-1: #0EA5E9;
+  --chart-2: #10B981;
+  --chart-3: #F59E0B;
+  --chart-4: #8B5CF6;
+  --chart-5: #EF4444;
+  --sidebar: #0D1320;
+  --sidebar-foreground: #E8EDF5;
+  --sidebar-primary: #0EA5E9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1A2639;
+  --sidebar-accent-foreground: #E8EDF5;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: #0EA5E9;
 }
 
 @theme inline {
@@ -126,33 +124,34 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, sans-serif;
   }
-
-  /**
-  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
-  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
-  */
 
   html {
     font-size: var(--font-size);
   }
 
+  h1, h2, h3, h4 {
+    font-family: 'Rajdhani', system-ui, sans-serif;
+    letter-spacing: 0.02em;
+  }
+
   h1 {
     font-size: var(--text-2xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-weight: 700;
+    line-height: 1.3;
   }
 
   h2 {
     font-size: var(--text-xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-weight: 600;
+    line-height: 1.3;
   }
 
   h3 {
     font-size: var(--text-lg);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
+    font-weight: 600;
+    line-height: 1.4;
   }
 
   h4 {
@@ -162,9 +161,10 @@
   }
 
   label {
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     font-weight: var(--font-weight-medium);
     line-height: 1.5;
+    color: #94A3B8;
   }
 
   button {
@@ -173,9 +173,31 @@
     line-height: 1.5;
   }
 
-  input {
+  input, select, textarea {
     font-size: var(--text-base);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+    background-color: #1E2A40;
+    color: #E8EDF5;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
   }
 }

@@ -3,30 +3,23 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Toaster } from './components/ui/sonner';
 
-// Auth Components
 import { LoginPage } from './components/auth/LoginPage';
-import { SignupPage } from './components/auth/SignupPage';
-import { AdminRoutingPage } from './components/admin/AdminRoutingPage';
+import { AdminLoginPage } from './components/auth/AdminLoginPage';
+import { AdminDashboard } from './components/admin/AdminDashboard';
 
-// Employee Components
-import { EmployeeDashboard } from './components/employee/EmployeeDashboard';
 import { PickupRequestForm } from './components/employee/PickupRequestForm';
 import { DropoffRequestForm } from './components/employee/DropoffRequestForm';
 import { AdhocRequestForm } from './components/employee/AdhocRequestForm';
 import { MyRequests } from './components/employee/MyRequests';
 import { EmployeeProfile } from './components/employee/EmployeeProfile';
 
-// Driver Components
-import { DriverRoute } from './components/driver/DriverRoute';
-import { DriverPassengers } from './components/driver/DriverPassengers';
-import { DriverVehicleInfo } from './components/driver/DriverVehicleInfo';
+import { DriverTodaysTrips } from './components/driver/DriverTodaysTrips';
 import { DriverProfile } from './components/driver/DriverProfile';
 
-// Protected Route Component
-const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'employee' | 'driver' | 'admin' }> = ({
-  children,
-  requiredRole,
-}) => {
+const ProtectedRoute: React.FC<{
+  children: React.ReactNode;
+  requiredRole?: 'employee' | 'driver' | 'admin';
+}> = ({ children, requiredRole }) => {
   const { user } = useAuth();
 
   if (!user) {
@@ -34,63 +27,57 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: 'empl
   }
 
   if (requiredRole && user.role !== requiredRole) {
-    // Redirect to appropriate dashboard if wrong role
-    if (user.role === 'employee') {
-      return <Navigate to="/employee/dashboard" replace />;
-    } else if (user.role === 'admin') {
-      return <Navigate to="/admin" replace />;
-    } else {
-      return <Navigate to="/driver/route" replace />;
-    }
+    if (user.role === 'employee') return <Navigate to="/employee/profile" replace />;
+    if (user.role === 'driver') return <Navigate to="/driver/profile" replace />;
+    if (user.role === 'admin') return <Navigate to="/admin" replace />;
   }
 
   return <>{children}</>;
 };
 
-// Main App Routes
 const AppRoutes: React.FC = () => {
   const { user } = useAuth();
 
   return (
     <Routes>
-      {/* Public Routes */}
+      {/* Public */}
       <Route
         path="/login"
         element={
           !user ? (
             <LoginPage />
+          ) : user.role === 'employee' ? (
+            <Navigate to="/employee/profile" replace />
+          ) : user.role === 'driver' ? (
+            <Navigate to="/driver/profile" replace />
           ) : (
-            <Navigate
-              to={
-                user.role === 'employee'
-                  ? '/employee/dashboard'
-                  : user.role === 'admin'
-                    ? '/admin'
-                    : '/driver/route'
-              }
-              replace
-            />
+            <Navigate to="/admin" replace />
           )
         }
       />
-      <Route path="/signup" element={!user ? <SignupPage /> : <Navigate to="/employee/dashboard" replace />} />
 
-      {/* Hidden Admin Route (URL only) */}
+      {/* Admin login — accessible only by direct URL */}
+      <Route
+        path="/login/admin"
+        element={!user ? <AdminLoginPage /> : <Navigate to="/admin" replace />}
+      />
+
+      {/* Admin */}
       <Route
         path="/admin"
         element={
           <ProtectedRoute requiredRole="admin">
-            <AdminRoutingPage />
+            <AdminDashboard />
           </ProtectedRoute>
         }
       />
 
-      {/* Employee Routes */}
+      {/* Employee */}
       <Route
-        path="/employee/dashboard"
+        path="/employee/profile"
         element={
           <ProtectedRoute requiredRole="employee">
-            <EmployeeDashboard />
+            <EmployeeProfile />
           </ProtectedRoute>
         }
       />
@@ -126,40 +113,8 @@ const AppRoutes: React.FC = () => {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/employee/profile"
-        element={
-          <ProtectedRoute requiredRole="employee">
-            <EmployeeProfile />
-          </ProtectedRoute>
-        }
-      />
 
-      {/* Driver Routes */}
-      <Route
-        path="/driver/route"
-        element={
-          <ProtectedRoute requiredRole="driver">
-            <DriverRoute />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/driver/passengers"
-        element={
-          <ProtectedRoute requiredRole="driver">
-            <DriverPassengers />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/driver/vehicle"
-        element={
-          <ProtectedRoute requiredRole="driver">
-            <DriverVehicleInfo />
-          </ProtectedRoute>
-        }
-      />
+      {/* Driver */}
       <Route
         path="/driver/profile"
         element={
@@ -168,40 +123,43 @@ const AppRoutes: React.FC = () => {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/driver/trips"
+        element={
+          <ProtectedRoute requiredRole="driver">
+            <DriverTodaysTrips />
+          </ProtectedRoute>
+        }
+      />
 
-      {/* Default Route */}
+      {/* Root redirect */}
       <Route
         path="/"
         element={
           user ? (
-            <Navigate
-              to={
-                user.role === 'employee'
-                  ? '/employee/dashboard'
-                  : user.role === 'admin'
-                    ? '/admin'
-                    : '/driver/route'
-              }
-              replace
-            />
+            user.role === 'employee' ? (
+              <Navigate to="/employee/profile" replace />
+            ) : user.role === 'driver' ? (
+              <Navigate to="/driver/profile" replace />
+            ) : (
+              <Navigate to="/admin" replace />
+            )
           ) : (
             <Navigate to="/login" replace />
           )
         }
       />
 
-      {/* 404 Catch All */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };
 
-// Main App Component
 const App: React.FC = () => {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-background">
           <AppRoutes />
           <Toaster />
         </div>
