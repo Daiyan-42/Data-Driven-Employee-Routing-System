@@ -3,8 +3,10 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 
 from app.database import supabase
-from app.dependencies import TokenData, get_current_user
+from app.dependencies import TokenData, get_current_user, require_admin
+from app.models.common import paginate
 from app.models.employee import (
+    EmployeesListResponse,
     EmployeeProfileResponse,
     EmployeeProfileUpdate,
     ScheduleResponse,
@@ -16,6 +18,17 @@ router = APIRouter(prefix="/employees", tags=["Employees"])
 
 def _svc() -> EmployeeService:
     return EmployeeService(supabase)
+
+
+@router.get("/", response_model=EmployeesListResponse)
+def list_employees(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=500),
+    _: TokenData = Depends(require_admin),
+    svc: EmployeeService = Depends(_svc),
+):
+    employees, pagination = paginate(svc.get_all(), page, limit)
+    return {"employees": employees, "pagination": pagination}
 
 
 @router.get("/me", response_model=EmployeeProfileResponse)

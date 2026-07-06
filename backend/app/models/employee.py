@@ -1,6 +1,7 @@
 from typing import Optional
 
 from pydantic import BaseModel
+from app.models.common import Pagination
 
 
 class EmployeeProfileResponse(BaseModel):
@@ -14,6 +15,11 @@ class EmployeeProfileResponse(BaseModel):
     role: str
     status: str
     is_active: bool
+
+
+class EmployeesListResponse(BaseModel):
+    employees: list[EmployeeProfileResponse]
+    pagination: Pagination
 
 
 class EmployeeProfileUpdate(BaseModel):
