@@ -1,12 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, drivers, vehicles, employee_requests, pickup_requests, dropoff_requests
 
 from app.routers import (
     auth,
-    admin
+    admin,
     drivers,
+    drivers_me,
     dropoff_requests,
+    employee_requests,
     employees,
     pickup_requests,
     vehicles,
@@ -21,7 +22,12 @@ app = FastAPI(
 # Allow frontend dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ShieldCheck, Mail, Lock, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { mockUsers } from '../../data/mockData';
+import { authApi } from '../../services/transportApi';
 
 export const AdminLoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -18,17 +18,24 @@ export const AdminLoginPage: React.FC = () => {
     setError('');
     setLoading(true);
 
-    await new Promise(r => setTimeout(r, 600));
-
-    const admin = mockUsers.find(u => u.email === email && u.password === password && u.role === 'admin');
-
-    if (admin) {
-      login(admin);
+    try {
+      const data = await authApi.login({ email, password });
+      if (data.user.role !== 'Admin') {
+        throw new Error('This account is not an admin.');
+      }
+      login({
+        id: String(data.user.user_id),
+        name: data.user.name,
+        email: data.user.email,
+        phone: data.user.phone ?? '',
+        role: 'admin',
+      });
       navigate('/admin');
-    } else {
-      setError('Invalid admin credentials.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid admin credentials.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
