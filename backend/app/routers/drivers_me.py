@@ -35,13 +35,17 @@ def update_my_profile(payload: Dict[str, Any], token: TokenData = Depends(get_cu
 
 @router.get("/assignments/today", response_model=Any)
 def my_assignment_today(token: TokenData = Depends(get_current_user), svc: RouteService = Depends(_route_svc)):
-    """Return today's assignment (route + ordered stops + passengers) or empty list."""
+    """Return today's assignment (route + ordered stops + passengers) or an empty list."""
     today = date.today().isoformat()
-    # RouteService returns all routes; filter for driver assignments server-side
     summary = svc.get_schedule_summary(service_date=today)
-    # filter routes where route.assignment.driver_id matches driver id
-    # find driver_id from driver table
-    return summary
+
+    driver = _svc().get_by_user_id(token.user_id)
+    if not driver:
+        return {"routes": []}
+
+    driver_id = driver.get("driver_id")
+    filtered_routes = [route for route in summary.routes if (route.assignment or {}).get("driver_id") == driver_id]
+    return {"routes": filtered_routes}
 
 
 @router.post("/route-assignments/{assignment_id}/start")

@@ -1,33 +1,84 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Sidebar } from '../shared/Sidebar';
 import { Users, Phone, MapPin, CheckCircle, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { mockRouteStops } from '../../data/mockData';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Button } from '../ui/button';
+import { driverApi } from '../../services/transportApi';
+import type { DriverAssignmentPassenger, DriverAssignmentStop } from '../../types/api';
+
+interface PassengerRow {
+  id: string;
+  name: string;
+  phone: string;
+  stopLocation: string;
+  stopTime: string;
+  stopType: string;
+  boarded: boolean;
+  stopId: number;
+  employeeId: number;
+}
 
 export const DriverPassengers: React.FC = () => {
-  const allPassengers = mockRouteStops.flatMap(stop =>
-    stop.passengers.map(p => ({
-      ...p,
-      stopLocation: stop.location,
-      stopTime: stop.estimatedTime,
-      stopType: stop.type,
-    }))
-  );
+  const [passengers, setPassengers] = useState<PassengerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const boardedPassengers = allPassengers.filter(p => p.isBoarded);
-  const waitingPassengers = allPassengers.filter(p => !p.isBoarded);
+  useEffect(() => {
+    const loadPassengers = async () => {
+      try {
+        setLoading(true);
+        const data = await driverApi.getTodayAssignment();
+        const rows: PassengerRow[] = [];
+        for (const route of data.routes ?? []) {
+          for (const stop of route.stops ?? []) {
+            for (const passenger of stop.passengers ?? []) {
+              rows.push({
+                id: `${stop.stop_id ?? 0}-${passenger.employee_id ?? 0}`,
+                name: passenger.employee_name ?? `Employee ${passenger.employee_id ?? ''}`,
+                phone: '—',
+                stopLocation: `Stop ${stop.sequence_order ?? 1}`,
+                stopTime: stop.arrival_time ?? '—',
+                stopType: 'pickup',
+                boarded: Boolean(passenger.boarded),
+                stopId: stop.stop_id ?? 0,
+                employeeId: passenger.employee_id ?? 0,
+              });
+            }
+          }
+        }
+        setPassengers(rows);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to load passengers');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const PassengerCard = ({ passenger }: { passenger: typeof allPassengers[0] }) => (
+    void loadPassengers();
+  }, []);
+
+  const boardedPassengers = useMemo(() => passengers.filter((p) => p.boarded), [passengers]);
+  const waitingPassengers = useMemo(() => passengers.filter((p) => !p.boarded), [passengers]);
+
+  const handleBoardPassenger = async (passenger: PassengerRow) => {
+    if (!passenger.stopId || !passenger.employeeId) return;
+    try {
+      await driverApi.boardPassenger(passenger.stopId, passenger.employeeId);
+      setPassengers((prev) => prev.map((item) => item.id === passenger.id ? { ...item, boarded: true } : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update boarding status');
+    }
+  };
+
+  const PassengerCard = ({ passenger }: { passenger: PassengerRow }) => (
     <Card className="border-0 shadow-md hover:shadow-lg transition-shadow">
       <CardContent className="p-6">
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 rounded-full w-12 h-12 flex items-center justify-center">
-              <span className="text-white font-semibold text-lg">
-                {passenger.name.split(' ').map(n => n[0]).join('')}
-              </span>
+              <span className="text-white font-semibold text-lg">{passenger.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}</span>
             </div>
             <div>
               <h3 className="font-semibold text-gray-900">{passenger.name}</h3>
@@ -37,8 +88,8 @@ export const DriverPassengers: React.FC = () => {
               </p>
             </div>
           </div>
-          <Badge className={passenger.isBoarded ? 'bg-green-500' : 'bg-orange-500'}>
-            {passenger.isBoarded ? 'Boarded' : 'Waiting'}
+          <Badge className={passenger.boarded ? 'bg-green-500' : 'bg-orange-500'}>
+            {passenger.boarded ? 'Boarded' : 'Waiting'}
           </Badge>
         </div>
 
@@ -46,7 +97,7 @@ export const DriverPassengers: React.FC = () => {
           <div className="flex items-start gap-2">
             <MapPin className="w-4 h-4 text-gray-400 mt-0.5" />
             <div>
-              <p className="text-xs text-gray-600">Stop Location</p>
+              <p className="text-xs text-gray-600">Stop</p>
               <p className="text-sm font-medium text-gray-900">{passenger.stopLocation}</p>
             </div>
           </div>
@@ -59,10 +110,10 @@ export const DriverPassengers: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className={passenger.stopType === 'pickup' ? 'border-blue-300 text-blue-600' : 'border-green-300 text-green-600'}>
-              {passenger.stopType}
-            </Badge>
+          <div className="pt-2">
+            <Button size="sm" variant={passenger.boarded ? 'secondary' : 'default'} onClick={() => void handleBoardPassenger(passenger)} disabled={passenger.boarded}>
+              {passenger.boarded ? 'Boarded' : 'Mark Boarded'}
+            </Button>
           </div>
         </div>
       </CardContent>
@@ -72,20 +123,21 @@ export const DriverPassengers: React.FC = () => {
   return (
     <Sidebar role="driver">
       <div className="p-6 max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Passengers</h1>
-          <p className="text-gray-600 mt-1">View and manage passenger information</p>
+          <p className="text-gray-600 mt-1">View and update passenger boarding state</p>
         </div>
 
-        {/* Summary Cards */}
+        {error && <p className="text-sm text-red-500 mb-4">{error}</p>}
+        {loading && <p className="text-sm text-slate-500 mb-4">Loading passenger list…</p>}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="border-0 shadow-md">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Total Passengers</p>
-                  <p className="text-3xl font-bold text-blue-600 mt-2">{allPassengers.length}</p>
+                  <p className="text-3xl font-bold text-blue-600 mt-2">{passengers.length}</p>
                 </div>
                 <div className="bg-blue-100 rounded-full p-3">
                   <Users className="w-6 h-6 text-blue-600" />
@@ -123,24 +175,23 @@ export const DriverPassengers: React.FC = () => {
           </Card>
         </div>
 
-        {/* Passenger List */}
         <Card className="border-0 shadow-lg">
           <CardHeader className="border-b border-gray-100">
             <CardTitle>Passenger List</CardTitle>
-            <CardDescription>Filter and view passengers by boarding status</CardDescription>
+            <CardDescription>Filter and view passengers by boarding state</CardDescription>
           </CardHeader>
           <CardContent className="p-6">
             <Tabs defaultValue="all" className="w-full">
               <TabsList className="grid w-full max-w-md grid-cols-3 mb-6">
-                <TabsTrigger value="all">All ({allPassengers.length})</TabsTrigger>
+                <TabsTrigger value="all">All ({passengers.length})</TabsTrigger>
                 <TabsTrigger value="boarded">Boarded ({boardedPassengers.length})</TabsTrigger>
                 <TabsTrigger value="waiting">Waiting ({waitingPassengers.length})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="all" className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {allPassengers.map((passenger, index) => (
-                    <PassengerCard key={`${passenger.id}-${index}`} passenger={passenger} />
+                  {passengers.map((passenger) => (
+                    <PassengerCard key={passenger.id} passenger={passenger} />
                   ))}
                 </div>
               </TabsContent>
@@ -148,8 +199,8 @@ export const DriverPassengers: React.FC = () => {
               <TabsContent value="boarded" className="space-y-4">
                 {boardedPassengers.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {boardedPassengers.map((passenger, index) => (
-                      <PassengerCard key={`${passenger.id}-${index}`} passenger={passenger} />
+                    {boardedPassengers.map((passenger) => (
+                      <PassengerCard key={passenger.id} passenger={passenger} />
                     ))}
                   </div>
                 ) : (
@@ -163,8 +214,8 @@ export const DriverPassengers: React.FC = () => {
               <TabsContent value="waiting" className="space-y-4">
                 {waitingPassengers.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {waitingPassengers.map((passenger, index) => (
-                      <PassengerCard key={`${passenger.id}-${index}`} passenger={passenger} />
+                    {waitingPassengers.map((passenger) => (
+                      <PassengerCard key={passenger.id} passenger={passenger} />
                     ))}
                   </div>
                 ) : (
