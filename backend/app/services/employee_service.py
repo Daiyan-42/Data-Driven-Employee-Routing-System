@@ -8,6 +8,14 @@ class EmployeeService:
     def __init__(self, db: Client):
         self.db = db
 
+    def get_all(self) -> list[dict]:
+        res = (
+            self.db.table("employee")
+            .select("employee_id, user_id, home_lat, home_lng, is_active, users(name, email, phone, role, status)")
+            .execute()
+        )
+        return [self._flatten_employee(row) for row in res.data]
+
     def _get_employee_or_404(self, user_id: int) -> dict:
         res = (
             self.db.table("employee")
@@ -19,6 +27,21 @@ class EmployeeService:
         if not res.data:
             raise HTTPException(status_code=404, detail="Employee record not found")
         return res.data[0]
+
+    def _flatten_employee(self, row: dict) -> dict:
+        user = row.get("users") or {}
+        return {
+            "user_id": row["user_id"],
+            "employee_id": row["employee_id"],
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "phone": user.get("phone"),
+            "home_lat": row.get("home_lat"),
+            "home_lng": row.get("home_lng"),
+            "role": user.get("role", "Employee"),
+            "status": user.get("status", "Active"),
+            "is_active": row.get("is_active", True),
+        }
 
     def _null_schedule(self, service_date: str) -> dict:
         return {

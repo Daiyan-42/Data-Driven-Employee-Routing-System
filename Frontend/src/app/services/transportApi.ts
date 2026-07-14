@@ -7,6 +7,7 @@ import type {
   DriverUpdate,
   DropoffRequest,
   DropoffRequestsListResponse,
+  EmployeesListResponse,
   PickupRequest,
   PickupRequestsListResponse,
   ScheduleResponse,
@@ -153,16 +154,13 @@ export const vehicleApi = {
 };
 
 export const pickupRequestApi = {
-  async list(_params?: { service_date?: string }): Promise<PickupRequestsListResponse> {
-    return {
-      pickup_requests: [],
-      pagination: {
-        current_page: 1,
-        total_pages: 1,
-        page_size: 0,
-        total_items: 0,
-      },
-    };
+  list(params?: { status?: string; service_date?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.service_date) query.set("service_date", params.service_date);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    return request<PickupRequestsListResponse>(`/pickup-requests/?${query.toString()}`);
   },
 
   approve(pickupId: number) {
@@ -206,6 +204,13 @@ export const dropoffRequestApi = {
 };
 
 export const employeeApi = {
+  list(params?: { page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    return request<EmployeesListResponse>(`/employees/?${query.toString()}`);
+  },
+
   async getSchedule(): Promise<ScheduleResponse> {
     return { routing_done: false };
   },

@@ -40,6 +40,24 @@ export interface Driver {
   user_status?: string | null;
 }
 
+export interface Employee {
+  user_id: number;
+  employee_id: number;
+  name: string;
+  email: string;
+  phone?: string | null;
+  home_lat?: number | null;
+  home_lng?: number | null;
+  role: string;
+  status: string;
+  is_active: boolean;
+}
+
+export interface EmployeesListResponse {
+  employees: Employee[];
+  pagination: Pagination;
+}
+
 export interface DriverCreate {
   name: string;
   email: string;

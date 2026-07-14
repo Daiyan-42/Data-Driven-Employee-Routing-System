@@ -56,6 +56,23 @@ class RequestService:
         res = query.order("created_at", desc=True).execute()
         return [self._flatten_pickup(r) for r in res.data]
 
+    def get_all_pickups(self, status: str = None, service_date: str = None):
+        query = (
+            self.db.table("pickup_request")
+            .select(
+                "*, "
+                "employee(employee_id, users(name)), "
+                "zone(zone_name)"
+            )
+        )
+        if status:
+            query = query.eq("status", status)
+        if service_date:
+            query = query.eq("service_date", service_date)
+
+        res = query.order("created_at", desc=True).execute()
+        return [self._flatten_pickup(r) for r in res.data]
+
     def update_my_pickup(self, pickup_id: int, user_id: int, data: PickupRequestUpdate):
         employee_id = self._get_employee_id_for_user(user_id)
         req = self._get_pickup_or_404(pickup_id, employee_id=employee_id)
