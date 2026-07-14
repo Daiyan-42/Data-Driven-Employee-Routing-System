@@ -3,22 +3,22 @@ import { Sidebar } from '../shared/Sidebar';
 import { MapPin, Send, CheckCircle, Lock, Info, Zap, Clock } from 'lucide-react';
 import { InteractiveMap } from '../shared/InteractiveMap';
 import { useAuth } from '../../context/AuthContext';
+import { pickupRequestApi } from '../../services/transportApi';
 
 const DHAKA_CENTER: [number, number] = [23.7808, 90.4043];
 
-// First trip is 7AM — adhoc closes 3 hrs before = 4AM
-// For demo: adhoc is available if it's before 4AM on a weekday. Simulate as available.
-const isAdhocAvailable = () => {
+const todayInput = () => {
   const now = new Date();
-  const hours = now.getHours();
-  const day = now.getDay();
-  // Block on weekends, or after 4AM (3 hrs before 7AM first trip)
-  if (day === 0 || day === 6) return false;
-  return hours < 4;
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
-// For demo purposes, show it as available so users can see the form
-const DEMO_AVAILABLE = true;
+const isTooCloseToShift = (shiftTime: string) => {
+  const shiftDate = new Date(`${todayInput()}T${shiftTime}:00`);
+  return shiftDate.getTime() - Date.now() < 2 * 60 * 60 * 1000;
+};
 
 export const AdhocRequestForm: React.FC = () => {
   const { user } = useAuth();
@@ -29,8 +29,8 @@ export const AdhocRequestForm: React.FC = () => {
   const [tripTime, setTripTime] = useState('07:00');
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const available = DEMO_AVAILABLE;
+  const [error, setError] = useState<string | null>(null);
+  const tooCloseToShift = isTooCloseToShift(tripTime);
 
   const handleLocationSelect = (lat: number, lng: number) => {
     setLatitude(lat);
@@ -40,34 +40,29 @@ export const AdhocRequestForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setIsSubmitting(false);
-    setSubmitted(true);
-  };
+    setError(null);
 
-  if (!available) {
-    return (
-      <Sidebar role="employee">
-        <div className="p-8 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[70vh]">
-          <div className="rounded-2xl border border-slate-700/50 bg-white/3 p-10 text-center max-w-md">
-            <div className="w-14 h-14 rounded-full bg-slate-500/10 border border-slate-500/20 flex items-center justify-center mx-auto mb-5">
-              <Lock className="w-7 h-7 text-slate-500" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-              Ad-hoc Window Closed
-            </h2>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Ad-hoc requests close <span className="text-white font-medium">3 hours before the first trip</span> (4:00 AM). The window has passed for today&apos;s trips.
-            </p>
-            <div className="mt-6 px-4 py-2.5 rounded-lg bg-white/4 border border-white/8 text-xs text-slate-600 font-mono">
-              Ad-hoc available: Midnight — 4:00 AM
-            </div>
-          </div>
-        </div>
-      </Sidebar>
-    );
-  }
+    if (tooCloseToShift) {
+      setError('Ad-hoc pickup must be submitted at least 2 hours before shift start.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      await pickupRequestApi.create({
+        pickup_lat: latitude,
+        pickup_lng: longitude,
+        shift_start_time: tripTime,
+        service_date: todayInput(),
+      });
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit ad-hoc request');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (submitted) {
     return (
@@ -106,9 +101,18 @@ export const AdhocRequestForm: React.FC = () => {
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/15 bg-amber-500/6 px-5 py-4 mb-6">
           <Info className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
           <p className="text-xs text-amber-300/80">
-            Ad-hoc requests must be submitted at least <span className="font-semibold text-amber-300">3 hours before your trip</span>. The window closes at 4:00 AM for the 7:00 AM first trip. Late requests will not be accepted.
+            Ad-hoc requests must be submitted at least <span className="font-semibold text-amber-300">2 hours before your trip</span>. Late requests will not be accepted.
           </p>
         </div>
+
+        {(error || tooCloseToShift) && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/8 px-5 py-4 mb-6">
+            <Lock className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-red-300/90">
+              {error ?? 'This trip is less than 2 hours away, so ad-hoc submission is closed.'}
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -173,7 +177,7 @@ export const AdhocRequestForm: React.FC = () => {
 
               <button
                 type="submit"
-                disabled={isSubmitting || !location}
+                disabled={isSubmitting || !location || tooCloseToShift}
                 className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition disabled:opacity-60"
               >
                 {isSubmitting ? (

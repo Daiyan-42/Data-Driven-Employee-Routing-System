@@ -1,35 +1,134 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from '../shared/Sidebar';
-import { Calendar, MapPin, Clock, CheckCircle, XCircle, AlertCircle, Car, User as UserIcon, Route, Navigation } from 'lucide-react';
-import { mockRequests } from '../../data/mockData';
+import { Calendar, MapPin, Clock, AlertCircle, Car, User as UserIcon, Route } from 'lucide-react';
 import { InteractiveMap } from '../shared/InteractiveMap';
 import { OFFICE_LOCATION } from '../../data/mockData';
+import { dropoffRequestApi, pickupRequestApi } from '../../services/transportApi';
+import type { DropoffRequest, PickupRequest, RequestStatus } from '../../types/api';
+
+type RequestTab = 'all' | 'routed' | 'pending' | 'rejected';
+type CombinedRequest = {
+  id: string;
+  rawId: number;
+  type: 'pickup' | 'dropoff';
+  requestType: string;
+  status: RequestStatus;
+  serviceDate: string;
+  shiftTime: string;
+  location: string;
+  latitude: number;
+  longitude: number;
+  createdAt?: string | null;
+};
+
+const coordinateLabel = (lat?: number | null, lng?: number | null) => {
+  if (lat == null || lng == null) return 'No location set';
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+};
+
+const normalizePickup = (request: PickupRequest): CombinedRequest => ({
+  id: `pickup-${request.pickup_id}`,
+  rawId: request.pickup_id,
+  type: 'pickup',
+  requestType: request.request_type ?? 'Regular',
+  status: request.status,
+  serviceDate: request.service_date,
+  shiftTime: request.shift_start_time ?? '-',
+  location: coordinateLabel(request.pickup_lat, request.pickup_lng),
+  latitude: request.pickup_lat ?? OFFICE_LOCATION.latitude,
+  longitude: request.pickup_lng ?? OFFICE_LOCATION.longitude,
+  createdAt: request.created_at,
+});
+
+const normalizeDropoff = (request: DropoffRequest): CombinedRequest => ({
+  id: `dropoff-${request.dropoff_id}`,
+  rawId: request.dropoff_id,
+  type: 'dropoff',
+  requestType: 'Dropoff',
+  status: request.status,
+  serviceDate: request.service_date,
+  shiftTime: request.shift_end_time ?? '-',
+  location: coordinateLabel(request.drop_lat, request.drop_lng),
+  latitude: request.drop_lat ?? OFFICE_LOCATION.latitude,
+  longitude: request.drop_lng ?? OFFICE_LOCATION.longitude,
+  createdAt: request.created_at,
+});
 
 export const MyRequests: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'all' | 'routed' | 'pending' | 'rejected'>('all');
+  const [activeTab, setActiveTab] = useState<RequestTab>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [requests, setRequests] = useState<CombinedRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
 
-  const filtered = mockRequests.filter(r => {
+  const loadRequests = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const [pickups, dropoffs] = await Promise.all([
+        pickupRequestApi.mine({ limit: 500 }),
+        dropoffRequestApi.mine({ limit: 500 }),
+      ]);
+
+      setRequests(
+        [
+          ...pickups.pickup_requests.map(normalizePickup),
+          ...dropoffs.dropoff_requests.map(normalizeDropoff),
+        ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load requests');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadRequests();
+  }, []);
+
+  const filtered = requests.filter(r => {
     if (activeTab === 'all') return true;
-    if (activeTab === 'routed') return r.status === 'routed' || r.status === 'approved';
-    return r.status === activeTab;
+    if (activeTab === 'routed') return r.status === 'Approved';
+    if (activeTab === 'pending') return r.status === 'Pending';
+    return r.status === 'Rejected';
   });
 
   const counts = {
-    all: mockRequests.length,
-    routed: mockRequests.filter(r => r.status === 'routed' || r.status === 'approved').length,
-    pending: mockRequests.filter(r => r.status === 'pending').length,
-    rejected: mockRequests.filter(r => r.status === 'rejected').length,
+    all: requests.length,
+    routed: requests.filter(r => r.status === 'Approved').length,
+    pending: requests.filter(r => r.status === 'Pending').length,
+    rejected: requests.filter(r => r.status === 'Rejected').length,
+  };
+
+  const handleCancel = async (request: CombinedRequest) => {
+    setCancelingId(request.id);
+    setError(null);
+
+    try {
+      if (request.type === 'pickup') {
+        await pickupRequestApi.remove(request.rawId);
+      } else {
+        await dropoffRequestApi.remove(request.rawId);
+      }
+      setRequests(prev => prev.filter(item => item.id !== request.id));
+      if (expandedId === request.id) setExpandedId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel request');
+    } finally {
+      setCancelingId(null);
+    }
   };
 
   const StatusBadge = ({ status }: { status: string }) => {
     const map: Record<string, { label: string; cls: string }> = {
-      routed: { label: 'Routed', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
-      approved: { label: 'Approved', cls: 'bg-sky-500/15 text-sky-400 border-sky-500/20' },
-      pending: { label: 'Pending', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
-      rejected: { label: 'Rejected', cls: 'bg-red-500/15 text-red-400 border-red-500/20' },
+      Approved: { label: 'Approved', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
+      Pending: { label: 'Pending', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
+      Rejected: { label: 'Rejected', cls: 'bg-red-500/15 text-red-400 border-red-500/20' },
     };
-    const m = map[status] || map.pending;
+    const m = map[status] || map.Pending;
     return (
       <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${m.cls}`}>
         {m.label}
@@ -44,6 +143,13 @@ export const MyRequests: React.FC = () => {
           <h1 className="text-3xl font-bold text-white mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>My Requests</h1>
           <p className="text-slate-500 text-sm">Track all your submitted transport requests.</p>
         </div>
+
+        {error && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/8 px-5 py-4 mb-6">
+            <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-red-300/90">{error}</p>
+          </div>
+        )}
 
         {/* Stat pills */}
         <div className="flex gap-3 mb-6 overflow-x-auto pb-1">
@@ -72,7 +178,14 @@ export const MyRequests: React.FC = () => {
 
         {/* Request cards */}
         <div className="space-y-3">
-          {filtered.length === 0 && (
+          {isLoading && (
+            <div className="text-center py-16 text-slate-600">
+              <Clock className="w-10 h-10 mx-auto mb-3 opacity-30 animate-pulse" />
+              <p>Loading your requests...</p>
+            </div>
+          )}
+
+          {!isLoading && filtered.length === 0 && (
             <div className="text-center py-16 text-slate-600">
               <MapPin className="w-10 h-10 mx-auto mb-3 opacity-30" />
               <p>No requests in this category.</p>
@@ -81,7 +194,8 @@ export const MyRequests: React.FC = () => {
 
           {filtered.map(req => {
             const isExpanded = expandedId === req.id;
-            const isRouted = req.status === 'routed' || req.status === 'approved';
+            const isRouted = req.status === 'Approved';
+            const canCancel = req.status === 'Pending';
             return (
               <div key={req.id} className="rounded-xl border border-white/8 bg-card overflow-hidden">
                 {/* Card header */}
@@ -119,6 +233,18 @@ export const MyRequests: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-3">
                     <StatusBadge status={req.status} />
+                    {canCancel && (
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleCancel(req);
+                        }}
+                        disabled={cancelingId === req.id}
+                        className="px-3 py-1.5 rounded-lg border border-red-500/20 bg-red-500/8 text-xs font-medium text-red-300 hover:bg-red-500/15 transition disabled:opacity-60"
+                      >
+                        {cancelingId === req.id ? 'Canceling...' : 'Cancel'}
+                      </button>
+                    )}
                     <div className={`text-slate-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -134,7 +260,9 @@ export const MyRequests: React.FC = () => {
                       {/* Info */}
                       <div className="space-y-4">
                         <div>
-                          <p className="text-xs text-slate-600 mb-1 uppercase tracking-wider">Pickup Location</p>
+                          <p className="text-xs text-slate-600 mb-1 uppercase tracking-wider">
+                            {req.type === 'pickup' ? 'Pickup Location' : 'Dropoff Location'}
+                          </p>
                           <div className="flex items-start gap-2">
                             <MapPin className="w-4 h-4 text-slate-600 mt-0.5" />
                             <p className="text-sm text-slate-300">{req.location}</p>
@@ -147,26 +275,20 @@ export const MyRequests: React.FC = () => {
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
                                 <Route className="w-4 h-4 text-emerald-400" />
-                                <p className="text-sm text-slate-300">{req.assignedRoute}</p>
+                                <p className="text-sm text-slate-300">Route pending assignment details</p>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Car className="w-4 h-4 text-sky-400" />
-                                <p className="text-sm text-slate-300">{req.assignedVehicle}</p>
+                                <p className="text-sm text-slate-300">Vehicle will appear after routing</p>
                               </div>
                               <div className="flex items-center gap-2">
                                 <UserIcon className="w-4 h-4 text-sky-400" />
-                                <p className="text-sm text-slate-300">{req.assignedDriver}</p>
+                                <p className="text-sm text-slate-300">Driver will appear after routing</p>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Clock className="w-4 h-4 text-amber-400" />
-                                <p className="text-sm text-slate-300">ETA: {req.estimatedTime}</p>
+                                <p className="text-sm text-slate-300">Scheduled time: {req.shiftTime}</p>
                               </div>
-                              {req.stopOrder && (
-                                <div className="flex items-center gap-2">
-                                  <Navigation className="w-4 h-4 text-purple-400" />
-                                  <p className="text-sm text-slate-300">Stop #{req.stopOrder} on route</p>
-                                </div>
-                              )}
                             </div>
                           </div>
                         ) : (

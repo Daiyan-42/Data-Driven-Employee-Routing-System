@@ -32,6 +32,11 @@ Thumbs.db
 .vscode/
 .idea/
 
+
+# package-lock.json
+Frontend/package-lock.json
+
+
 # Vite cache
 .vite/
 
