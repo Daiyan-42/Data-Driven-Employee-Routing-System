@@ -2,7 +2,9 @@ import { apiUrl } from "../config/api";
 import type {
   AuthLoginResponse,
   Driver,
+  DriverAssignmentResponse,
   DriverCreate,
+  DriverSelfProfile,
   DriversListResponse,
   DriverUpdate,
   DropoffRequest,
@@ -116,6 +118,39 @@ export const driverApi = {
   remove(driverId: number) {
     return request<{ message: string }>(`/drivers/${driverId}`, {
       method: "DELETE",
+    });
+  },
+
+  getMe() {
+    return request<DriverSelfProfile>("/drivers/me");
+  },
+
+  updateMe(payload: { phone?: string; license_no?: string; name?: string }) {
+    return request<DriverSelfProfile>("/drivers/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getTodayAssignment() {
+    return request<DriverAssignmentResponse>("/drivers/me/assignments/today");
+  },
+
+  startAssignment(assignmentId: number) {
+    return request<{ message: string; assignment_id: number }>(`/drivers/me/route-assignments/${assignmentId}/start`, {
+      method: "POST",
+    });
+  },
+
+  completeAssignment(assignmentId: number) {
+    return request<{ message: string; assignment_id: number }>(`/drivers/me/route-assignments/${assignmentId}/complete`, {
+      method: "POST",
+    });
+  },
+
+  boardPassenger(stopId: number, employeeId: number) {
+    return request<{ message: string; employee_id: number; stop_id: number }>(`/drivers/me/stops/${stopId}/passengers/${employeeId}/board`, {
+      method: "POST",
     });
   },
 };

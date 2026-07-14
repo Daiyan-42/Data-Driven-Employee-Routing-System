@@ -24,8 +24,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
@@ -35,11 +39,11 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth.router)
+app.include_router(drivers_me.router)
 app.include_router(drivers.router)
 
 app.include_router(vehicles.router)
 app.include_router(employee_requests.router)
-app.include_router(drivers_me.router)
 app.include_router(pickup_requests.router)
 app.include_router(dropoff_requests.router)
 app.include_router(admin.router)

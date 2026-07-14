@@ -1,28 +1,53 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from '../shared/Sidebar';
 import { User as UserIcon, Mail, Phone, MapPin, Lock, Save, CheckCircle, Car, Hash, Shield, Fuel } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { mockDrivers, mockVehicles } from '../../data/mockData';
+import { driverApi } from '../../services/transportApi';
+import type { DriverSelfProfile } from '../../types/api';
 
 export const DriverProfile: React.FC = () => {
-  const { user } = useAuth();
-  const driver = mockDrivers.find(d => d.userId === user?.id) || mockDrivers[0];
-  const vehicle = mockVehicles.find(v => v.id === driver?.vehicleId);
-
+  const { user, updateUser } = useAuth();
+  const [driver, setDriver] = useState<DriverSelfProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [editMode, setEditMode] = useState(false);
-  const [phone, setPhone] = useState(user?.phone || '');
-  const [address, setAddress] = useState(user?.address || '');
+  const [phone, setPhone] = useState('');
+  const [licenseNo, setLicenseNo] = useState('');
   const [saved, setSaved] = useState(false);
 
   const [pwdForm, setPwdForm] = useState({ current: '', next: '', confirm: '' });
   const [pwdError, setPwdError] = useState('');
   const [pwdSaved, setPwdSaved] = useState(false);
 
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        setLoading(true);
+        const data = await driverApi.getMe();
+        setDriver(data);
+        setPhone(data.phone ?? '');
+        setLicenseNo(data.license_no ?? '');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to load profile');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadProfile();
+  }, []);
+
   const handleSave = async () => {
-    await new Promise(r => setTimeout(r, 600));
-    setSaved(true);
-    setEditMode(false);
-    setTimeout(() => setSaved(false), 3000);
+    try {
+      const updated = await driverApi.updateMe({ phone, license_no: licenseNo });
+      setDriver(updated);
+      updateUser({ phone: updated.phone ?? '' });
+      setSaved(true);
+      setEditMode(false);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to update profile');
+    }
   };
 
   const handleChangePwd = async (e: React.FormEvent) => {
@@ -50,15 +75,15 @@ export const DriverProfile: React.FC = () => {
             {user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2)}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user?.name}</h2>
-            <p className="text-slate-500 text-sm">{user?.email}</p>
+            <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{driver?.name ?? user?.name}</h2>
+            <p className="text-slate-500 text-sm">{driver?.email ?? user?.email}</p>
             <div className="flex items-center gap-3 mt-2">
               <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/15 text-emerald-400">
                 Driver
               </span>
-              {driver?.experience && (
+              {driver?.status && (
                 <span className="text-xs px-2 py-0.5 rounded bg-white/6 border border-white/8 text-slate-500">
-                  {driver.experience} experience
+                  {driver.status}
                 </span>
               )}
             </div>
@@ -71,8 +96,11 @@ export const DriverProfile: React.FC = () => {
           </button>
         </div>
 
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+        {loading && <p className="text-sm text-slate-400 mb-4">Loading profile…</p>}
+
         {/* Vehicle card */}
-        {vehicle && (
+        {driver?.vehicle && (
           <div className="rounded-xl border border-sky-500/15 bg-sky-500/6 p-5 mb-5">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-500/20 flex items-center justify-center">
@@ -82,11 +110,11 @@ export const DriverProfile: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               {[
-                { label: 'Plate Number', value: vehicle.plateNumber, icon: Hash },
-                { label: 'Model', value: vehicle.model, icon: Car },
-                { label: 'Type', value: vehicle.type, icon: Fuel },
-                { label: 'Capacity', value: `${vehicle.capacity} seats`, icon: UserIcon },
-                { label: 'Color', value: vehicle.color, icon: Shield },
+                { label: 'Plate Number', value: driver.vehicle.plate_no, icon: Hash },
+                { label: 'Model', value: driver.vehicle.model, icon: Car },
+                { label: 'Type', value: driver.vehicle.make, icon: Fuel },
+                { label: 'Capacity', value: 'Assigned vehicle', icon: UserIcon },
+                { label: 'Status', value: driver.status, icon: Shield },
               ].map(({ label, value, icon: Icon }) => (
                 <div key={label} className="flex items-start gap-2">
                   <Icon className="w-4 h-4 text-slate-600 mt-0.5" />
@@ -118,13 +146,13 @@ export const DriverProfile: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider">Home Address</label>
+                <label className="block text-xs text-slate-500 mb-1.5 uppercase tracking-wider">License Number</label>
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
+                  <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
                   <input
                     type="text"
-                    value={address}
-                    onChange={e => setAddress(e.target.value)}
+                    value={licenseNo}
+                    onChange={e => setLicenseNo(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-lg border border-white/10 bg-white/5 text-white placeholder:text-slate-700 text-sm focus:outline-none focus:border-sky-500/40 transition"
                   />
                 </div>
@@ -137,11 +165,10 @@ export const DriverProfile: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {[
-                { label: 'Full Name', value: user?.name, icon: UserIcon },
-                { label: 'Email', value: user?.email, icon: Mail },
-                { label: 'Phone', value: user?.phone, icon: Phone },
-                { label: 'Home Address', value: user?.address, icon: MapPin },
-                { label: 'License Number', value: driver?.licenseNumber, icon: Shield },
+                { label: 'Full Name', value: driver?.name ?? user?.name, icon: UserIcon },
+                { label: 'Email', value: driver?.email ?? user?.email, icon: Mail },
+                { label: 'Phone', value: driver?.phone ?? user?.phone, icon: Phone },
+                { label: 'License Number', value: driver?.license_no, icon: Shield },
               ].map(({ label, value, icon: Icon }) => (
                 <div key={label} className="flex items-start gap-3 py-3 border-b border-white/4 last:border-0">
                   <Icon className="w-4 h-4 text-slate-600 mt-0.5" />
