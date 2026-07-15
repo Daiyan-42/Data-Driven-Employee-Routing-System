@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -106,7 +106,7 @@ class RouteResponse(BaseModel):
 
 
 class ScheduleRouteStop(RouteStopResponse):
-    passengers: List[str] = []
+    passengers: List[dict[str, Any]] = []
 
 
 class RouteDetailResponse(RouteResponse):

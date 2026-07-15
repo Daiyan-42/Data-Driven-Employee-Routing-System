@@ -40,6 +40,31 @@ export interface Driver {
   user_status?: string | null;
 }
 
+export interface Employee {
+  user_id: number;
+  employee_id: number;
+  name: string;
+  email: string;
+  phone?: string | null;
+  home_lat?: number | null;
+  home_lng?: number | null;
+  role: string;
+  status: string;
+  is_active: boolean;
+}
+
+export interface EmployeeProfileUpdate {
+  name?: string;
+  phone?: string;
+  home_lat?: number;
+  home_lng?: number;
+}
+
+export interface EmployeesListResponse {
+  employees: Employee[];
+  pagination: Pagination;
+}
+
 export interface DriverCreate {
   name: string;
   email: string;
@@ -50,6 +75,68 @@ export interface DriverCreate {
 }
 
 export type DriverUpdate = Partial<Pick<DriverCreate, "name" | "phone" | "license_no" | "status">>;
+
+export interface DriverSelfVehicle {
+  vehicle_id?: number | null;
+  plate_no?: string | null;
+  make?: string | null;
+  model?: string | null;
+}
+
+export interface DriverSelfProfile {
+  driver_id: number;
+  user_id: number;
+  license_no?: string | null;
+  status?: string | null;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  user_status?: string | null;
+  vehicle?: DriverSelfVehicle | null;
+}
+
+export interface DriverAssignmentPassenger {
+  employee_id?: number | null;
+  employee_name?: string | null;
+  boarded?: boolean | null;
+}
+
+export interface DriverAssignmentStop {
+  stop_id?: number | null;
+  route_id?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  sequence_order?: number | null;
+  arrival_time?: string | null;
+  departure_time?: string | null;
+  passengers: DriverAssignmentPassenger[];
+}
+
+export interface DriverAssignmentRoute {
+  route_id?: number | null;
+  zone_id?: number | null;
+  zone_name?: string | null;
+  route_type?: string | null;
+  service_date?: string | null;
+  shift_time?: string | null;
+  total_distance_km?: number | null;
+  total_travel_time_min?: number | null;
+  created_at?: string | null;
+  stops: DriverAssignmentStop[];
+  assignment?: {
+    assignment_id?: number | null;
+    route_id?: number | null;
+    vehicle_id?: number | null;
+    driver_id?: number | null;
+    departure_time?: string | null;
+    arrival_time?: string | null;
+    status?: string | null;
+  } | null;
+}
+
+export interface DriverAssignmentResponse {
+  routes: DriverAssignmentRoute[];
+}
 
 export interface DriversListResponse {
   drivers: Driver[];

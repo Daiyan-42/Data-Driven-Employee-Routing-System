@@ -1,16 +1,39 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from '../shared/Sidebar';
 import { Car, Calendar, Users, MapPin, Clock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { mockVehicles, mockRouteStops } from '../../data/mockData';
 import { Badge } from '../ui/badge';
+import { driverApi } from '../../services/transportApi';
+import type { DriverAssignmentRoute, DriverSelfProfile } from '../../types/api';
 
 export const DriverVehicleInfo: React.FC = () => {
-  const vehicle = mockVehicles[0];
-  const departureTime = '07:30';
-  const assignedRoute = 'Morning Office Route - Zone A';
-  const totalStops = mockRouteStops.length;
-  const totalPassengers = mockRouteStops.reduce((acc, stop) => acc + stop.passengers.length, 0);
+  const [profile, setProfile] = useState<DriverSelfProfile | null>(null);
+  const [assignment, setAssignment] = useState<DriverAssignmentRoute | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        const [profileData, assignmentData] = await Promise.all([driverApi.getMe(), driverApi.getTodayAssignment()]);
+        setProfile(profileData);
+        setAssignment(assignmentData.routes?.[0] ?? null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to load vehicle info');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadData();
+  }, []);
+
+  const vehicle = profile?.vehicle;
+  const departureTime = assignment?.assignment?.departure_time ?? '—';
+  const assignedRoute = assignment?.zone_name ? `${assignment.zone_name} route` : 'No route assigned';
+  const totalStops = assignment?.stops?.length ?? 0;
+  const totalPassengers = assignment?.stops?.reduce((acc, stop) => acc + (stop.passengers?.length ?? 0), 0) ?? 0;
 
   return (
     <Sidebar role="driver">
@@ -21,6 +44,9 @@ export const DriverVehicleInfo: React.FC = () => {
           <p className="text-gray-600 mt-1">Details about your assigned vehicle and route</p>
         </div>
 
+        {error && <p className="text-sm text-red-500 mb-4">{error}</p>}
+        {loading && <p className="text-sm text-slate-500 mb-4">Loading your vehicle and route…</p>}
+
         {/* Vehicle Card */}
         <Card className="border-0 shadow-xl mb-6">
           <CardHeader className="border-b border-gray-100 bg-gradient-to-r from-blue-50 to-white">
@@ -29,8 +55,8 @@ export const DriverVehicleInfo: React.FC = () => {
                 <Car className="w-12 h-12 text-white" />
               </div>
               <div>
-                <CardTitle className="text-3xl">{vehicle.plateNumber}</CardTitle>
-                <CardDescription className="text-base">{vehicle.type}</CardDescription>
+                <CardTitle className="text-3xl">{vehicle?.plate_no ?? '—'}</CardTitle>
+                <CardDescription className="text-base">{vehicle?.make ?? 'Vehicle'} {vehicle?.model ?? ''}</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -42,7 +68,7 @@ export const DriverVehicleInfo: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Capacity</p>
-                  <p className="text-2xl font-bold text-gray-900">{vehicle.capacity}</p>
+                  <p className="text-2xl font-bold text-gray-900">{profile?.vehicle ? 'Assigned' : '—'}</p>
                   <p className="text-xs text-gray-500">Passengers</p>
                 </div>
               </div>
@@ -53,7 +79,7 @@ export const DriverVehicleInfo: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Vehicle Type</p>
-                  <p className="text-xl font-bold text-gray-900">{vehicle.type}</p>
+                  <p className="text-xl font-bold text-gray-900">{vehicle?.make ?? '—'}</p>
                   <Badge className="mt-1 bg-blue-500">Active</Badge>
                 </div>
               </div>
@@ -64,7 +90,7 @@ export const DriverVehicleInfo: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Vehicle ID</p>
-                  <p className="text-xl font-bold text-gray-900">{vehicle.id.toUpperCase()}</p>
+                  <p className="text-xl font-bold text-gray-900">{vehicle?.vehicle_id ?? '—'}</p>
                   <p className="text-xs text-gray-500">System ID</p>
                 </div>
               </div>
@@ -128,29 +154,29 @@ export const DriverVehicleInfo: React.FC = () => {
           </CardHeader>
           <CardContent className="p-6">
             <div className="space-y-3">
-              {mockRouteStops.map((stop) => (
+              {assignment?.stops?.map((stop) => (
                 <div
-                  key={stop.id}
+                  key={`${stop.stop_id ?? stop.sequence_order ?? 'stop'}-${stop.sequence_order ?? 0}`}
                   className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   <div className="bg-blue-600 text-white rounded-full w-10 h-10 flex items-center justify-center font-bold flex-shrink-0">
-                    {stop.order}
+                    {stop.sequence_order}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="font-semibold text-gray-900 truncate">{stop.location}</p>
-                      <Badge className={stop.type === 'pickup' ? 'bg-blue-500' : 'bg-green-500'}>
-                        {stop.type}
+                      <p className="font-semibold text-gray-900 truncate">Stop {stop.sequence_order}</p>
+                      <Badge className="bg-blue-500">
+                        Stop
                       </Badge>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-600">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        {stop.estimatedTime}
+                        {stop.arrival_time ?? '—'}
                       </span>
                       <span className="flex items-center gap-1">
                         <Users className="w-3 h-3" />
-                        {stop.passengers.length} passenger{stop.passengers.length !== 1 ? 's' : ''}
+                        {(stop.passengers?.length ?? 0)} passenger{(stop.passengers?.length ?? 0) !== 1 ? 's' : ''}
                       </span>
                     </div>
                   </div>

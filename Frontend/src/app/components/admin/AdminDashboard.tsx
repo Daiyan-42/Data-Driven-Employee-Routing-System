@@ -8,12 +8,9 @@ import {
   Navigation, BarChart3, Shield,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import {
-  mockUsers, mockVehicles, mockDrivers, mockRequests,
-  User,
-} from '../../data/mockData';
-import { driverApi, dropoffRequestApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
-import type { Driver, DropoffRequest, Vehicle } from '../../types/api';
+import { mockRequests, User } from '../../data/mockData';
+import { driverApi, dropoffRequestApi, employeeApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
+import type { Driver, DropoffRequest, PickupRequest, Vehicle } from '../../types/api';
 
 type AdminView = 'overview' | 'employees' | 'drivers' | 'vehicles' | 'requests' | 'routing';
 
@@ -30,7 +27,7 @@ export const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [view, setView] = useState<AdminView>('overview');
-  const [employees, setEmployees] = useState<User[]>(mockUsers.filter(u => u.role === 'employee'));
+  const [employees, setEmployees] = useState<User[]>([]);
   const [searchQ, setSearchQ] = useState('');
 
   // Modals
@@ -46,23 +43,36 @@ export const AdminDashboard: React.FC = () => {
   const [isRouting, setIsRouting] = useState(false);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [pickupRequests, setPickupRequests] = useState<PickupRequest[]>([]);
   const [dropoffRequests, setDropoffRequests] = useState<DropoffRequest[]>([]);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [pickupActionId, setPickupActionId] = useState('');
   const [requestActionLoading, setRequestActionLoading] = useState(false);
 
   const loadAdminApiData = async () => {
     setApiLoading(true);
     setApiError(null);
     try {
-      const [driverRes, vehicleRes, dropoffRes] = await Promise.all([
+      const [employeeRes, driverRes, vehicleRes, pickupRes, dropoffRes] = await Promise.all([
+        employeeApi.list({ page: 1, limit: 100 }),
         driverApi.list({ page: 1, limit: 100 }),
         vehicleApi.list({ page: 1, limit: 100 }),
+        pickupRequestApi.list({ page: 1, limit: 100 }),
         dropoffRequestApi.list({ page: 1, limit: 100 }),
       ]);
+      setEmployees(employeeRes.employees.map(emp => ({
+        id: String(emp.user_id),
+        name: emp.name,
+        email: emp.email,
+        phone: emp.phone ?? '',
+        role: 'employee',
+        latitude: emp.home_lat ?? undefined,
+        longitude: emp.home_lng ?? undefined,
+        employeeId: String(emp.employee_id),
+      })));
       setDrivers(driverRes.drivers);
       setVehicles(vehicleRes.vehicles);
+      setPickupRequests(pickupRes.pickup_requests);
       setDropoffRequests(dropoffRes.dropoff_requests);
     } catch (err) {
       setApiError(err instanceof Error ? err.message : 'Could not load backend data.');
@@ -83,22 +93,20 @@ export const AdminDashboard: React.FC = () => {
   const totalEmployees = employees.length;
   const totalDrivers = drivers.length;
   const totalVehicles = vehicles.length;
-  const pendingRequests = dropoffRequests.filter(r => r.status === 'Pending').length;
-  const routedRequests = mockRequests.filter(r => r.status === 'routed').length;
-
-  const filteredRequests = mockRequests.filter(r => {
+  const allRequests = [
+    ...pickupRequests.map(r => ({ kind: 'pickup' as const, id: r.pickup_id, employeeName: r.employee_name, employeeId: r.employee_id, serviceDate: r.service_date, shiftTime: r.shift_start_time, status: r.status, lat: r.pickup_lat, lng: r.pickup_lng, zoneName: r.zone_name })),
+    ...dropoffRequests.map(r => ({ kind: 'dropoff' as const, id: r.dropoff_id, employeeName: r.employee_name, employeeId: r.employee_id, serviceDate: r.service_date, shiftTime: r.shift_end_time, status: r.status, lat: r.drop_lat, lng: r.drop_lng, zoneName: r.zone_name })),
+  ];
+  const pendingRequests = allRequests.filter(r => r.status === 'Pending').length;
+  const routedRequests = allRequests.filter(r => r.status === 'Approved').length;
+  const filteredRequests = allRequests.filter(r => {
     const matchShift = selectedShiftFilter === 'all' || r.shiftTime === selectedShiftFilter;
     const matchDate = selectedDateFilter === 'all' || r.serviceDate === selectedDateFilter;
     return matchShift && matchDate;
   });
 
-  const uniqueShifts = [...new Set(mockRequests.map(r => r.shiftTime))];
-  const uniqueDates = [...new Set(mockRequests.map(r => r.serviceDate))];
-  const filteredDropoffRequests = dropoffRequests.filter(r => {
-    const matchDate = selectedDateFilter === 'all' || r.service_date === selectedDateFilter;
-    return matchDate;
-  });
-  const uniqueDropoffDates = [...new Set(dropoffRequests.map(r => r.service_date))];
+  const uniqueShifts = [...new Set(allRequests.map(r => r.shiftTime).filter(Boolean))];
+  const uniqueDates = [...new Set(allRequests.map(r => r.serviceDate))];
 
   const approveDropoff = async (dropoffId: number) => {
     setRequestActionLoading(true);
@@ -126,24 +134,27 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const updatePickupStatus = async (action: 'approve' | 'reject') => {
-    const id = Number(pickupActionId);
-    if (!id) {
-      setApiError('Enter a valid pickup request ID.');
-      return;
-    }
-
+  const approvePickup = async (pickupId: number) => {
     setRequestActionLoading(true);
     setApiError(null);
     try {
-      if (action === 'approve') {
-        await pickupRequestApi.approve(id);
-      } else {
-        await pickupRequestApi.reject(id);
-      }
-      setPickupActionId('');
+      await pickupRequestApi.approve(pickupId);
+      await loadAdminApiData();
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : `Could not ${action} pickup request.`);
+      setApiError(err instanceof Error ? err.message : 'Could not approve pickup request.');
+    } finally {
+      setRequestActionLoading(false);
+    }
+  };
+
+  const rejectPickup = async (pickupId: number) => {
+    setRequestActionLoading(true);
+    setApiError(null);
+    try {
+      await pickupRequestApi.reject(pickupId);
+      await loadAdminApiData();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not reject pickup request.');
     } finally {
       setRequestActionLoading(false);
     }
@@ -593,35 +604,9 @@ export const AdminDashboard: React.FC = () => {
                   className="px-3 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                 >
                   <option value="all">All Dates</option>
-                  {uniqueDropoffDates.map(d => <option key={d} value={d}>{d}</option>)}
+                  {uniqueDates.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
-                <span className="text-xs text-slate-600 ml-auto">{filteredDropoffRequests.length} dropoff requests</span>
-              </div>
-
-              <div className="rounded-xl border border-white/8 bg-card p-4 flex flex-wrap items-end gap-3">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Pickup ID</label>
-                  <input
-                    value={pickupActionId}
-                    onChange={e => setPickupActionId(e.target.value)}
-                    placeholder="e.g. 12"
-                    className="w-36 px-3 py-2 rounded-lg border border-white/8 bg-white/4 text-white placeholder:text-slate-700 text-sm focus:outline-none focus:border-sky-500/40 transition"
-                  />
-                </div>
-                <button
-                  onClick={() => updatePickupStatus('approve')}
-                  disabled={requestActionLoading}
-                  className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold transition disabled:opacity-60"
-                >
-                  Approve Pickup
-                </button>
-                <button
-                  onClick={() => updatePickupStatus('reject')}
-                  disabled={requestActionLoading}
-                  className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-400 text-white text-sm font-semibold transition disabled:opacity-60"
-                >
-                  Reject Pickup
-                </button>
+                <span className="text-xs text-slate-600 ml-auto">{filteredRequests.length} requests</span>
               </div>
 
               <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
@@ -638,17 +623,19 @@ export const AdminDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredDropoffRequests.map((r, i) => (
-                      <tr key={r.dropoff_id} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
-                        <td className="px-6 py-4 text-sm text-white font-medium">{r.employee_name || `Employee #${r.employee_id}`}</td>
+                    {filteredRequests.map((r, i) => (
+                      <tr key={`${r.kind}-${r.id}`} className={`border-b border-white/4 hover:bg-white/3 transition ${i % 2 === 0 ? '' : 'bg-white/1'}`}>
+                        <td className="px-6 py-4 text-sm text-white font-medium">{r.employeeName || `Employee #${r.employeeId}`}</td>
                         <td className="px-6 py-4">
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">dropoff</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${r.kind === 'pickup' ? 'bg-sky-500/15 text-sky-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
+                            {r.kind}
+                          </span>
                         </td>
                         <td className="px-6 py-4 text-xs text-slate-400 max-w-[180px] truncate">
-                          {r.zone_name || `${r.drop_lat ?? '—'}, ${r.drop_lng ?? '—'}`}
+                          {r.zoneName || `${r.lat ?? '—'}, ${r.lng ?? '—'}`}
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-400">{r.service_date}</td>
-                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{r.shift_end_time || '—'}</td>
+                        <td className="px-6 py-4 text-xs text-slate-400">{r.serviceDate}</td>
+                        <td className="px-6 py-4 text-xs text-slate-400 font-mono">{r.shiftTime || '—'}</td>
                         <td className="px-6 py-4">
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
                             r.status === 'Approved' ? 'bg-emerald-500/15 text-emerald-400'
@@ -661,14 +648,14 @@ export const AdminDashboard: React.FC = () => {
                         <td className="px-6 py-4 text-xs text-slate-500">
                           <div className="flex gap-2">
                             <button
-                              onClick={() => approveDropoff(r.dropoff_id)}
+                              onClick={() => r.kind === 'pickup' ? approvePickup(r.id) : approveDropoff(r.id)}
                               disabled={requestActionLoading || r.status !== 'Pending'}
                               className="px-2 py-1 rounded bg-emerald-500/15 text-emerald-400 disabled:opacity-40"
                             >
                               Approve
                             </button>
                             <button
-                              onClick={() => rejectDropoff(r.dropoff_id)}
+                              onClick={() => r.kind === 'pickup' ? rejectPickup(r.id) : rejectDropoff(r.id)}
                               disabled={requestActionLoading || r.status !== 'Pending'}
                               className="px-2 py-1 rounded bg-red-500/15 text-red-400 disabled:opacity-40"
                             >
@@ -680,8 +667,8 @@ export const AdminDashboard: React.FC = () => {
                     ))}
                   </tbody>
                 </table>
-                {filteredDropoffRequests.length === 0 && (
-                  <div className="text-center py-12 text-slate-600">No dropoff requests match the filters.</div>
+                {filteredRequests.length === 0 && (
+                  <div className="text-center py-12 text-slate-600">No requests match the filters.</div>
                 )}
               </div>
             </div>

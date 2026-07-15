@@ -197,7 +197,7 @@ class DriverService:
         driver_id = drv.data[0]["driver_id"]
 
         ra = (
-            self.db.table("route_assignment").select("*").eq("route_assignment_id", assignment_id).limit(1).execute()
+            self.db.table("route_assignment").select("*").eq("assignment_id", assignment_id).limit(1).execute()
         )
         if not ra.data:
             raise HTTPException(status_code=404, detail="Assignment not found")
@@ -206,7 +206,7 @@ class DriverService:
             raise HTTPException(status_code=403, detail="Not authorized for this assignment")
 
         # set status to InProgress and started_at
-        self.db.table("route_assignment").update({"status": "InProgress"}).eq("route_assignment_id", assignment_id).execute()
+        self.db.table("route_assignment").update({"status": "InProgress"}).eq("assignment_id", assignment_id).execute()
         return {"message": "assignment started", "assignment_id": assignment_id}
 
     def complete_assignment_for_driver(self, user_id: int, assignment_id: int):
@@ -219,7 +219,7 @@ class DriverService:
         driver_id = drv.data[0]["driver_id"]
 
         ra = (
-            self.db.table("route_assignment").select("*").eq("route_assignment_id", assignment_id).limit(1).execute()
+            self.db.table("route_assignment").select("*").eq("assignment_id", assignment_id).limit(1).execute()
         )
         if not ra.data:
             raise HTTPException(status_code=404, detail="Assignment not found")
@@ -227,7 +227,7 @@ class DriverService:
         if rec.get("driver_id") != driver_id:
             raise HTTPException(status_code=403, detail="Not authorized for this assignment")
 
-        self.db.table("route_assignment").update({"status": "Completed"}).eq("route_assignment_id", assignment_id).execute()
+        self.db.table("route_assignment").update({"status": "Completed"}).eq("assignment_id", assignment_id).execute()
         return {"message": "assignment completed", "assignment_id": assignment_id}
 
     def board_passenger(self, user_id: int, stop_id: int, employee_id: int):
@@ -239,24 +239,23 @@ class DriverService:
             raise HTTPException(status_code=404, detail="Driver not found")
         driver_id = drv.data[0]["driver_id"]
 
-        # find route_stop
+        # find route_stop and route assignment
         rs = (
-            self.db.table("route_stop").select("route_stop_id, route_assignment_id").eq("route_stop_id", stop_id).limit(1).execute()
+            self.db.table("route_stop").select("stop_id, route_id").eq("stop_id", stop_id).limit(1).execute()
         )
         if not rs.data:
             raise HTTPException(status_code=404, detail="Stop not found")
         route_stop = rs.data[0]
 
-        # check assignment belongs to driver
         ra = (
-            self.db.table("route_assignment").select("*").eq("route_assignment_id", route_stop.get("route_assignment_id")).limit(1).execute()
+            self.db.table("route_assignment").select("*").eq("route_id", route_stop.get("route_id")).limit(1).execute()
         )
         if not ra.data or ra.data[0].get("driver_id") != driver_id:
             raise HTTPException(status_code=403, detail="Not authorized for this stop")
 
         # find stop_passenger record and mark boarded
         sp = (
-            self.db.table("stop_passenger").select("stop_passenger_id, boarded").eq("route_stop_id", stop_id).eq("employee_id", employee_id).limit(1).execute()
+            self.db.table("stop_passenger").select("stop_passenger_id, boarded").eq("stop_id", stop_id).eq("employee_id", employee_id).limit(1).execute()
         )
         if not sp.data:
             raise HTTPException(status_code=404, detail="Passenger not assigned to this stop")

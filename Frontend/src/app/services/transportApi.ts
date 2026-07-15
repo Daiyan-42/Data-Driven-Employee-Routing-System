@@ -2,11 +2,16 @@ import { apiUrl } from "../config/api";
 import type {
   AuthLoginResponse,
   Driver,
+  DriverAssignmentResponse,
   DriverCreate,
+  DriverSelfProfile,
   DriversListResponse,
   DriverUpdate,
   DropoffRequest,
   DropoffRequestsListResponse,
+  Employee,
+  EmployeeProfileUpdate,
+  EmployeesListResponse,
   PickupRequest,
   PickupRequestsListResponse,
   ScheduleResponse,
@@ -117,6 +122,39 @@ export const driverApi = {
       method: "DELETE",
     });
   },
+
+  getMe() {
+    return request<DriverSelfProfile>("/drivers/me");
+  },
+
+  updateMe(payload: { phone?: string; license_no?: string; name?: string }) {
+    return request<DriverSelfProfile>("/drivers/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getTodayAssignment() {
+    return request<DriverAssignmentResponse>("/drivers/me/assignments/today");
+  },
+
+  startAssignment(assignmentId: number) {
+    return request<{ message: string; assignment_id: number }>(`/drivers/me/route-assignments/${assignmentId}/start`, {
+      method: "POST",
+    });
+  },
+
+  completeAssignment(assignmentId: number) {
+    return request<{ message: string; assignment_id: number }>(`/drivers/me/route-assignments/${assignmentId}/complete`, {
+      method: "POST",
+    });
+  },
+
+  boardPassenger(stopId: number, employeeId: number) {
+    return request<{ message: string; employee_id: number; stop_id: number }>(`/drivers/me/stops/${stopId}/passengers/${employeeId}/board`, {
+      method: "POST",
+    });
+  },
 };
 
 export const vehicleApi = {
@@ -155,15 +193,28 @@ export const vehicleApi = {
 export const pickupRequestApi = {
   list(params?: { status?: string; service_date?: string; page?: number; limit?: number }) {
     const query = new URLSearchParams();
+
     if (params?.status) query.set("status", params.status);
     if (params?.service_date) query.set("service_date", params.service_date);
     if (params?.page) query.set("page", String(params.page));
     if (params?.limit) query.set("limit", String(params.limit));
-    return request<PickupRequestsListResponse>(`/pickup-requests/mine?${query.toString()}`);
+
+    return request<PickupRequestsListResponse>(
+      `/pickup-requests/?${query.toString()}`
+    );
   },
 
   mine(params?: { status?: string; service_date?: string; page?: number; limit?: number }) {
-    return this.list(params);
+    const query = new URLSearchParams();
+
+    if (params?.status) query.set("status", params.status);
+    if (params?.service_date) query.set("service_date", params.service_date);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+
+    return request<PickupRequestsListResponse>(
+      `/pickup-requests/mine?${query.toString()}`
+    );
   },
 
   create(payload: {
@@ -286,7 +337,27 @@ export const dropoffRequestApi = {
 };
 
 export const employeeApi = {
-  async getSchedule(): Promise<ScheduleResponse> {
-    return { routing_done: false };
+  list(params?: { page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    return request<EmployeesListResponse>(`/employees/?${query.toString()}`);
+  },
+
+  getProfile(): Promise<Employee> {
+    return request<Employee>("/employees/me");
+  },
+
+  updateProfile(payload: EmployeeProfileUpdate): Promise<Employee> {
+    return request<Employee>("/employees/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getSchedule(serviceDate?: string): Promise<ScheduleResponse> {
+    const today = new Date().toISOString().split("T")[0];
+    const query = new URLSearchParams({ service_date: serviceDate ?? today });
+    return request<ScheduleResponse>(`/employees/me/schedule?${query.toString()}`);
   },
 };

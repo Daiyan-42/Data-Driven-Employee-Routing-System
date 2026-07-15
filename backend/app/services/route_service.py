@@ -111,8 +111,11 @@ class RouteService:
         for stop_passenger in (row.get("stop_passenger") or []):
             employee = stop_passenger.get("employee") or {}
             users = employee.get("users") or {}
-            if users.get("name"):
-                passengers.append(users.get("name"))
+            passengers.append({
+                "employee_id": employee.get("employee_id"),
+                "employee_name": users.get("name"),
+                "boarded": stop_passenger.get("boarded", False),
+            })
 
         return {
             "stop_id": row["stop_id"],
