@@ -1,11 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Sidebar } from '../shared/Sidebar';
 import {
   MapPin, Clock, Send, CheckCircle, ArrowRight, ArrowLeft,
-  Info, Calendar, AlertTriangle, Lock,
+  Info, Calendar, AlertTriangle,
 } from 'lucide-react';
 import { InteractiveMap } from '../shared/InteractiveMap';
 import { useAuth } from '../../context/AuthContext';
+import { pickupRequestApi } from '../../services/transportApi';
 
 const ALL_DAYS = [
   { id: 'sunday', label: 'Sun', full: 'Sunday' },
@@ -30,26 +31,56 @@ interface DaySchedule {
   shiftTime: string;
 }
 
-// Deadline: Friday midnight to Saturday midnight (Sun–Thu window only)
-const isWithinDeadline = () => {
-  const now = new Date();
-  const day = now.getDay(); // 0=Sun, 5=Fri, 6=Sat
-  return day !== 5 && day !== 6; // Fri & Sat are deadline window — submission allowed
+const dayIndex: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
 };
 
-const deadlinePassed = () => {
+const toDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const nextDateForDay = (day: string) => {
   const now = new Date();
-  const day = now.getDay();
-  return day !== 5 && day !== 6;
+  const target = dayIndex[day];
+  const offset = (target - now.getDay() + 7) % 7;
+  const date = new Date(now);
+  date.setDate(now.getDate() + offset);
+  return toDateInput(date);
+};
+
+const predictedRequestType = (serviceDate: string) => {
+  const service = new Date(`${serviceDate}T00:00:00`);
+  if (service.getDay() === 0 || service.getDay() === 6) return 'Ad-hoc';
+
+  const deadline = new Date(service);
+  deadline.setDate(service.getDate() - 1);
+  deadline.setHours(18, 0, 0, 0);
+  return new Date() <= deadline ? 'Regular' : 'Ad-hoc';
+};
+
+const isAdhocTooLate = (serviceDate: string, shiftTime: string) => {
+  if (predictedRequestType(serviceDate) !== 'Ad-hoc') return false;
+  const shiftDate = new Date(`${serviceDate}T${shiftTime}:00`);
+  return shiftDate.getTime() - Date.now() < 2 * 60 * 60 * 1000;
 };
 
 export const PickupRequestForm: React.FC = () => {
   const { user } = useAuth();
   const [selectedDays, setSelectedDays] = useState<string[]>(['monday']);
   const [currentDayIdx, setCurrentDayIdx] = useState(0);
-  const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [step, setStep] = useState<'days' | 'details' | 'success'>('days');
+  const [error, setError] = useState<string | null>(null);
+  const [createdCount, setCreatedCount] = useState(0);
 
   const [schedules, setSchedules] = useState<Record<string, DaySchedule>>(
     Object.fromEntries(
@@ -66,8 +97,6 @@ export const PickupRequestForm: React.FC = () => {
     )
   );
 
-  const withinDeadline = !deadlinePassed(); // flip: deadline open on Fri/Sat
-
   const toggleDay = (day: string) => {
     setSelectedDays(prev =>
       prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
@@ -76,6 +105,11 @@ export const PickupRequestForm: React.FC = () => {
 
   const currentDay = selectedDays[currentDayIdx];
   const currentSchedule = schedules[currentDay] || null;
+  const currentServiceDate = currentDay ? nextDateForDay(currentDay) : '';
+  const currentRequestType = currentServiceDate ? predictedRequestType(currentServiceDate) : 'Regular';
+  const currentTooLate = currentSchedule
+    ? isAdhocTooLate(currentServiceDate, currentSchedule.shiftTime)
+    : false;
 
   const handleLocationSelect = (lat: number, lng: number) => {
     if (!currentDay) return;
@@ -91,35 +125,40 @@ export const PickupRequestForm: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    setError(null);
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setIsSubmitting(false);
-    setStep('success');
-  };
 
-  if (!withinDeadline) {
-    return (
-      <Sidebar role="employee">
-        <div className="p-8 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[70vh]">
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/8 p-10 text-center max-w-md">
-            <div className="w-14 h-14 rounded-full bg-amber-500/15 border border-amber-500/20 flex items-center justify-center mx-auto mb-5">
-              <Lock className="w-7 h-7 text-amber-400" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-3" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-              Submission Window Closed
-            </h2>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Pickup requests for the upcoming week can only be submitted on <span className="text-amber-400 font-medium">Friday and Saturday</span>.
-              The next submission window opens this Friday.
-            </p>
-            <div className="mt-6 px-4 py-2.5 rounded-lg bg-white/4 border border-white/8 text-xs text-slate-500 font-mono">
-              Next window: Friday 00:00 — Saturday 23:59
-            </div>
-          </div>
-        </div>
-      </Sidebar>
-    );
-  }
+    try {
+      const invalid = selectedDays.find(day => {
+        const schedule = schedules[day];
+        return isAdhocTooLate(nextDateForDay(day), schedule.shiftTime);
+      });
+
+      if (invalid) {
+        const dayName = ALL_DAYS.find(d => d.id === invalid)?.full ?? invalid;
+        throw new Error(`Ad-hoc pickup for ${dayName} must be submitted at least 2 hours before shift start.`);
+      }
+
+      await Promise.all(
+        selectedDays.map(day => {
+          const schedule = schedules[day];
+          return pickupRequestApi.create({
+            pickup_lat: schedule.latitude,
+            pickup_lng: schedule.longitude,
+            shift_start_time: schedule.shiftTime,
+            service_date: nextDateForDay(day),
+          });
+        }),
+      );
+
+      setCreatedCount(selectedDays.length);
+      setStep('success');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to submit pickup request');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (step === 'success') {
     return (
@@ -133,7 +172,7 @@ export const PickupRequestForm: React.FC = () => {
               Requests Submitted!
             </h2>
             <p className="text-slate-400 text-sm leading-relaxed mb-2">
-              Pickup requests for <span className="text-white font-medium">{selectedDays.length} day(s)</span> have been submitted.
+              Pickup requests for <span className="text-white font-medium">{createdCount || selectedDays.length} day(s)</span> have been submitted.
             </p>
             <p className="text-xs text-slate-600">
               You will be notified once routes are assigned. Check <strong className="text-slate-400">My Requests</strong> for status.
@@ -165,10 +204,17 @@ export const PickupRequestForm: React.FC = () => {
         <div className="flex items-start gap-3 rounded-xl border border-sky-500/15 bg-sky-500/8 px-5 py-4 mb-6">
           <Info className="w-4 h-4 text-sky-400 mt-0.5 flex-shrink-0" />
           <p className="text-xs text-sky-300/80">
-            Pickup requests for next week must be submitted by <span className="font-semibold text-sky-300">Saturday midnight</span>.
-            Late submissions will not be accepted.
+            Regular pickup requests must be submitted by <span className="font-semibold text-sky-300">6 PM on the previous day</span>.
+            Late and weekend pickups are submitted as Ad-hoc automatically.
           </p>
         </div>
+
+        {error && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/8 px-5 py-4 mb-6">
+            <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-red-300/90">{error}</p>
+          </div>
+        )}
 
         {step === 'days' && (
           <div className="space-y-6">
@@ -267,6 +313,27 @@ export const PickupRequestForm: React.FC = () => {
                   </h3>
                 </div>
 
+                {currentRequestType === 'Ad-hoc' && (
+                  <div className="flex items-start gap-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3">
+                    <Info className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-amber-300">Ad-hoc request</p>
+                      <p className="text-xs text-amber-300/75">
+                        The regular deadline has passed for {currentServiceDate}, so the backend will classify this as Ad-hoc.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {currentTooLate && (
+                  <div className="flex items-start gap-3 rounded-lg border border-red-500/20 bg-red-500/8 px-4 py-3">
+                    <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs text-red-300/90">
+                      Ad-hoc pickup must be submitted at least 2 hours before this shift.
+                    </p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Shift Time</label>
                   <select
@@ -328,7 +395,7 @@ export const PickupRequestForm: React.FC = () => {
                   ) : (
                     <button
                       onClick={handleSubmit}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || currentTooLate}
                       className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm transition disabled:opacity-60 ml-auto"
                     >
                       {isSubmitting ? (

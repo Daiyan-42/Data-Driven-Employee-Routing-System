@@ -34,6 +34,7 @@ class RequestService:
             "request_type": self._pickup_request_type(data.service_date),
             "status": "Pending",
         }
+        self._ensure_adhoc_pickup_window(payload["request_type"], data.service_date, data.shift_start_time)
         res = self.db.table("pickup_request").insert(payload).execute()
         return self.get_pickup_by_id(res.data[0]["pickup_id"])
 
@@ -104,6 +105,9 @@ class RequestService:
         if data.service_date is not None:
             payload["service_date"] = data.service_date.isoformat()
             payload["request_type"] = self._pickup_request_type(data.service_date)
+
+        request_type = payload.get("request_type") or req.get("request_type")
+        self._ensure_adhoc_pickup_window(request_type, next_service_date, next_shift_start_time)
 
         if payload:
             self.db.table("pickup_request").update(payload).eq("pickup_id", pickup_id).execute()
@@ -296,7 +300,7 @@ class RequestService:
     def _get_pickup_or_404(self, pickup_id: int, employee_id: int = None):
         query = (
             self.db.table("pickup_request")
-            .select("pickup_id, employee_id, status, pickup_lat, pickup_lng, shift_start_time, service_date")
+            .select("pickup_id, employee_id, status, pickup_lat, pickup_lng, shift_start_time, service_date, request_type")
             .eq("pickup_id", pickup_id)
         )
         if employee_id is not None:
@@ -352,6 +356,20 @@ class RequestService:
         )
         if datetime.now() < service_datetime:
             raise HTTPException(status_code=409, detail="Dropoff request can be submitted only after shift ends")
+
+    def _ensure_adhoc_pickup_window(self, request_type: str, service_date, shift_start_time):
+        if request_type != "Ad-hoc":
+            return
+
+        shift_datetime = datetime.combine(
+            self._normalize_date(service_date),
+            self._normalize_time(shift_start_time),
+        )
+        if shift_datetime - datetime.now() < timedelta(hours=2):
+            raise HTTPException(
+                status_code=409,
+                detail="Ad-hoc pickup requests must be submitted at least 2 hours before shift start",
+            )
 
     def _ensure_no_duplicate_pickup(
         self,

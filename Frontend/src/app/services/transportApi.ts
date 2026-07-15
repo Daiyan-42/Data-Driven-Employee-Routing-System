@@ -193,11 +193,63 @@ export const vehicleApi = {
 export const pickupRequestApi = {
   list(params?: { status?: string; service_date?: string; page?: number; limit?: number }) {
     const query = new URLSearchParams();
+
     if (params?.status) query.set("status", params.status);
     if (params?.service_date) query.set("service_date", params.service_date);
     if (params?.page) query.set("page", String(params.page));
     if (params?.limit) query.set("limit", String(params.limit));
-    return request<PickupRequestsListResponse>(`/pickup-requests/?${query.toString()}`);
+
+    return request<PickupRequestsListResponse>(
+      `/pickup-requests/?${query.toString()}`
+    );
+  },
+
+  mine(params?: { status?: string; service_date?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+
+    if (params?.status) query.set("status", params.status);
+    if (params?.service_date) query.set("service_date", params.service_date);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+
+    return request<PickupRequestsListResponse>(
+      `/pickup-requests/mine?${query.toString()}`
+    );
+  },
+
+  create(payload: {
+    zone_id?: number;
+    pickup_lat: number;
+    pickup_lng: number;
+    shift_start_time: string;
+    service_date: string;
+  }) {
+    return request<PickupRequest>("/pickup-requests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  update(
+    pickupId: number,
+    payload: {
+      zone_id?: number;
+      pickup_lat?: number;
+      pickup_lng?: number;
+      shift_start_time?: string;
+      service_date?: string;
+    },
+  ) {
+    return request<PickupRequest>(`/pickup-requests/${pickupId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  remove(pickupId: number) {
+    return request<{ message: string }>(`/pickup-requests/${pickupId}`, {
+      method: "DELETE",
+    });
   },
 
   approve(pickupId: number) {
@@ -225,6 +277,50 @@ export const dropoffRequestApi = {
 
   getById(dropoffId: number) {
     return request<DropoffRequest>(`/dropoff-requests/${dropoffId}`);
+  },
+
+  mine(params?: { status?: string; service_date?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.service_date) query.set("service_date", params.service_date);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    return request<DropoffRequestsListResponse>(`/dropoff-requests/mine?${query.toString()}`);
+  },
+
+  create(payload: {
+    zone_id?: number;
+    drop_lat: number;
+    drop_lng: number;
+    shift_end_time: string;
+    service_date: string;
+  }) {
+    return request<DropoffRequest>("/dropoff-requests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  update(
+    dropoffId: number,
+    payload: {
+      zone_id?: number;
+      drop_lat?: number;
+      drop_lng?: number;
+      shift_end_time?: string;
+      service_date?: string;
+    },
+  ) {
+    return request<DropoffRequest>(`/dropoff-requests/${dropoffId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  remove(dropoffId: number) {
+    return request<{ message: string }>(`/dropoff-requests/${dropoffId}`, {
+      method: "DELETE",
+    });
   },
 
   approve(dropoffId: number) {
