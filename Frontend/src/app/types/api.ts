@@ -53,6 +53,13 @@ export interface Employee {
   is_active: boolean;
 }
 
+export interface EmployeeProfileUpdate {
+  name?: string;
+  phone?: string;
+  home_lat?: number;
+  home_lng?: number;
+}
+
 export interface EmployeesListResponse {
   employees: Employee[];
   pagination: Pagination;
