@@ -9,6 +9,8 @@ import type {
   DriverUpdate,
   DropoffRequest,
   DropoffRequestsListResponse,
+  Employee,
+  EmployeeProfileUpdate,
   EmployeesListResponse,
   PickupRequest,
   PickupRequestsListResponse,
@@ -246,7 +248,20 @@ export const employeeApi = {
     return request<EmployeesListResponse>(`/employees/?${query.toString()}`);
   },
 
-  async getSchedule(): Promise<ScheduleResponse> {
-    return { routing_done: false };
+  getProfile(): Promise<Employee> {
+    return request<Employee>("/employees/me");
+  },
+
+  updateProfile(payload: EmployeeProfileUpdate): Promise<Employee> {
+    return request<Employee>("/employees/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getSchedule(serviceDate?: string): Promise<ScheduleResponse> {
+    const today = new Date().toISOString().split("T")[0];
+    const query = new URLSearchParams({ service_date: serviceDate ?? today });
+    return request<ScheduleResponse>(`/employees/me/schedule?${query.toString()}`);
   },
 };
