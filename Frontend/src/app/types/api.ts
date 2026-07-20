@@ -231,3 +231,102 @@ export interface ScheduleResponse {
     capacity?: number;
   };
 }
+
+export interface PickupRoutingZoneCount {
+  zone_id?: number | null;
+  zone_name?: string | null;
+  total_requests: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+}
+
+export interface PickupRoutingInputResponse {
+  service_date: string;
+  shift_start_time?: string | null;
+  total_requests: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  zones: PickupRoutingZoneCount[];
+}
+
+export interface PickupRoutingRunPayload {
+  service_date: string;
+  shift_start_time?: string | null;
+  office_lat: number;
+  office_lng: number;
+  office_buffer_minutes?: number;
+  stop_dwell_minutes?: number;
+  average_speed_kmph?: number;
+}
+
+export interface DropoffRoutingRunPayload {
+  service_date: string;
+  shift_end_time?: string | null;
+  office_lat: number;
+  office_lng: number;
+  office_buffer_minutes?: number;
+  stop_dwell_minutes?: number;
+  average_speed_kmph?: number;
+}
+
+export interface RoutingRunResponse {
+  routes_created: number;
+  employees_assigned: number;
+  unassigned_pickup_ids: number[];
+  message?: string | null;
+}
+
+export interface RouteAssignmentResponse {
+  assignment_id: number;
+  route_id: number;
+  vehicle_id: number;
+  driver_id?: number | null;
+  departure_time?: string | null;
+  arrival_time?: string | null;
+  status: string;
+}
+
+export interface RouteStopPassenger {
+  employee_id?: number | null;
+  employee_name?: string | null;
+  boarded?: boolean | null;
+}
+
+export interface RouteStopResponse {
+  stop_id: number;
+  route_id: number;
+  latitude: number;
+  longitude: number;
+  sequence_order: number;
+  arrival_time?: string | null;
+  departure_time?: string | null;
+  passengers: RouteStopPassenger[];
+}
+
+export interface RouteDetailResponse {
+  route_id: number;
+  zone_id?: number | null;
+  zone_name?: string | null;
+  route_type: string;
+  service_date: string;
+  shift_time?: string | null;
+  total_distance_km?: number | null;
+  total_travel_time_min?: number | null;
+  created_at?: string | null;
+  stops: RouteStopResponse[];
+  assignment?: RouteAssignmentResponse | null;
+}
+
+export interface ScheduleSummaryResponse {
+  routes: RouteDetailResponse[];
+}
+
+export interface RouteAssignPayload {
+  vehicle_id: number;
+  driver_id: number;
+  departure_time?: string | null;
+  arrival_time?: string | null;
+  status?: string;
+}

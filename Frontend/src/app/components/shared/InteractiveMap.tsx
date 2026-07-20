@@ -78,13 +78,11 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
 
     mapInstanceRef.current = map;
 
-    // CartoDB dark tiles for travel feel
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
     }).addTo(map);
 
-    L.control.attribution({ prefix: '© OSM · CartoDB' }).addTo(map);
+    L.control.attribution({ prefix: '© OpenStreetMap contributors' }).addTo(map);
 
     if (onLocationSelect) {
       map.on('click', (e: L.LeafletMouseEvent) => {

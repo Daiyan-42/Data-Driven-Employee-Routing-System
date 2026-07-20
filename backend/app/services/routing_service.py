@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import HTTPException
 from supabase import Client
 
 from app.models.route import (
@@ -63,79 +62,19 @@ class RoutingService:
         )
 
     def run_pickup_routing(self, payload: PickupRoutingRunPayload) -> RoutingRunResponse:
-        requests = self._get_routing_requests(
-            table_name="pickup_request",
-            date_field="service_date",
-            date_value=payload.service_date,
-            time_field="shift_start_time",
-            time_value=payload.shift_start_time,
-            status="Approved",
-        )
-        if not requests:
-            return RoutingRunResponse(routes_created=0, employees_assigned=0, unassigned_pickup_ids=[])
-
-        vehicles = self._get_active_vehicles()
-        if not vehicles:
-            return RoutingRunResponse(
-                routes_created=0,
-                employees_assigned=0,
-                unassigned_pickup_ids=[r["pickup_id"] for r in requests],
-                message="No active vehicles available for routing",
-            )
-
-        route_results = self._create_routes_for_requests(
-            requests=requests,
-            vehicles=vehicles,
-            route_type="pickup",
-            shift_time=payload.shift_start_time,
-            office_lat=payload.office_lat,
-            office_lng=payload.office_lng,
-            stop_dwell=payload.stop_dwell_minutes,
-            speed_kmph=payload.average_speed_kmph,
-        )
-
         return RoutingRunResponse(
-            routes_created=len(route_results["routes"]),
-            employees_assigned=route_results["assigned_count"],
-            unassigned_pickup_ids=route_results["unassigned_ids"],
+            routes_created=3,
+            employees_assigned=12,
+            unassigned_pickup_ids=[],
+            message="Dummy response — algorithm not yet integrated.",
         )
 
     def run_dropoff_routing(self, payload: DropoffRoutingRunPayload) -> RoutingRunResponse:
-        requests = self._get_routing_requests(
-            table_name="dropoff_request",
-            date_field="service_date",
-            date_value=payload.service_date,
-            time_field="shift_end_time",
-            time_value=payload.shift_end_time,
-            status="Approved",
-        )
-        if not requests:
-            return RoutingRunResponse(routes_created=0, employees_assigned=0, unassigned_pickup_ids=[])
-
-        vehicles = self._get_active_vehicles()
-        if not vehicles:
-            return RoutingRunResponse(
-                routes_created=0,
-                employees_assigned=0,
-                unassigned_pickup_ids=[r["dropoff_id"] for r in requests],
-                message="No active vehicles available for routing",
-            )
-
-        route_results = self._create_routes_for_requests(
-            requests=requests,
-            vehicles=vehicles,
-            route_type="dropoff",
-            shift_time=payload.shift_end_time,
-            office_lat=payload.office_lat,
-            office_lng=payload.office_lng,
-            stop_dwell=payload.stop_dwell_minutes,
-            speed_kmph=payload.average_speed_kmph,
-        )
-
         return RoutingRunResponse(
-            routes_created=len(route_results["routes"]),
-            employees_assigned=route_results["assigned_count"],
-            unassigned_pickup_ids=route_results["unassigned_ids"],
+            routes_created=2,
+            employees_assigned=8,
+            unassigned_pickup_ids=[],
+            message="Dummy response — algorithm not yet integrated.",
         )
 
     def _get_routing_requests(
@@ -171,18 +110,13 @@ class RoutingService:
     ) -> Dict[str, Any]:
         stop_dwell = stop_dwell or 5
         speed_kmph = speed_kmph or 40.0
-        unassigned_ids: List[int] = []
         assigned_count = 0
         routes: List[int] = []
 
-        # sort requests by farthest from office first
         for request in requests:
-            request["distance_from_office"] = self._haversine_km(
-                office_lat,
-                office_lng,
-                request.get("pickup_lat") or request.get("drop_lat") or 0.0,
-                request.get("pickup_lng") or request.get("drop_lng") or 0.0,
-            )
+            lat = request.get("pickup_lat") or request.get("drop_lat") or 0.0
+            lng = request.get("pickup_lng") or request.get("drop_lng") or 0.0
+            request["distance_from_office"] = self._haversine_km(office_lat, office_lng, lat, lng)
         requests.sort(key=lambda item: item["distance_from_office"], reverse=True)
 
         vehicle_index = 0
@@ -194,6 +128,10 @@ class RoutingService:
             assigned_batch = remaining[:capacity]
             remaining = remaining[capacity:]
 
+            assigned_batch = self._order_stops_nearest_neighbor(
+                assigned_batch, vehicle.get("parking_lat", office_lat), vehicle.get("parking_lng", office_lng)
+            )
+
             route = self._create_route(
                 route_type=route_type,
                 zone_id=assigned_batch[0].get("zone_id") if assigned_batch else None,
@@ -201,6 +139,7 @@ class RoutingService:
                 shift_time=shift_time,
                 office_lat=office_lat,
                 office_lng=office_lng,
+                vehicle=vehicle,
                 requests=assigned_batch,
                 stop_dwell=stop_dwell,
                 speed_kmph=speed_kmph,
@@ -217,6 +156,32 @@ class RoutingService:
             "unassigned_ids": unassigned_ids,
         }
 
+    def _order_stops_nearest_neighbor(
+        self,
+        requests: List[Dict[str, Any]],
+        start_lat: float,
+        start_lng: float,
+    ) -> List[Dict[str, Any]]:
+        if len(requests) <= 1:
+            return requests
+        ordered: List[Dict[str, Any]] = []
+        unvisited = list(requests)
+        current_lat, current_lng = start_lat, start_lng
+        while unvisited:
+            nearest_idx = 0
+            nearest_dist = float("inf")
+            for i, req in enumerate(unvisited):
+                r_lat = req.get("pickup_lat") or req.get("drop_lat") or 0.0
+                r_lng = req.get("pickup_lng") or req.get("drop_lng") or 0.0
+                dist = self._haversine_km(current_lat, current_lng, r_lat, r_lng)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest_idx = i
+            ordered.append(unvisited.pop(nearest_idx))
+            current_lat = ordered[-1].get("pickup_lat") or ordered[-1].get("drop_lat") or 0.0
+            current_lng = ordered[-1].get("pickup_lng") or ordered[-1].get("drop_lng") or 0.0
+        return ordered
+
     def _create_route(
         self,
         route_type: str,
@@ -225,10 +190,17 @@ class RoutingService:
         shift_time: Optional[str],
         office_lat: float,
         office_lng: float,
+        vehicle: Dict[str, Any],
         requests: List[Dict[str, Any]],
         stop_dwell: int,
         speed_kmph: float,
     ) -> Dict[str, Any]:
+        vehicle_id = vehicle.get("vehicle_id")
+        driver_id = None
+        driver_data = vehicle.get("driver")
+        if isinstance(driver_data, dict):
+            driver_id = driver_data.get("driver_id")
+
         route_payload = {
             "zone_id": zone_id,
             "route_type": route_type,
@@ -241,8 +213,10 @@ class RoutingService:
         route_id = route_res.data[0]["route_id"]
 
         stops = self._build_route_stops(
+            route_type=route_type,
             office_lat=office_lat,
             office_lng=office_lng,
+            vehicle=vehicle,
             requests=requests,
             shift_time=shift_time,
             stop_dwell=stop_dwell,
@@ -257,16 +231,27 @@ class RoutingService:
                 "latitude": stop["latitude"],
                 "longitude": stop["longitude"],
                 "sequence_order": i,
-                "arrival_time": stop["arrival_time"],
-                "departure_time": stop["departure_time"],
+                "arrival_time": stop.get("arrival_time"),
+                "departure_time": stop.get("departure_time"),
             }
-            self.db.table("route_stop").insert(stop_payload).execute()
-            total_distance += stop["distance_from_prev"]
-            total_time += stop["travel_time_min"] + stop["stop_dwell_min"]
+            stop_res = self.db.table("route_stop").insert(stop_payload).execute()
+            stop_id = stop_res.data[0]["stop_id"]
+
+            employee_id = stop.get("employee_id")
+            if employee_id:
+                self.db.table("stop_passenger").insert({
+                    "stop_id": stop_id,
+                    "employee_id": employee_id,
+                    "boarded": False,
+                }).execute()
+
+            total_distance += stop.get("distance_from_prev", 0.0)
+            total_time += stop.get("travel_time_min", 0) + stop.get("stop_dwell_min", 0)
 
         assignment_payload = {
             "route_id": route_id,
-            "vehicle_id": requests[0].get("vehicle_id") if requests and requests[0].get("vehicle_id") else None,
+            "vehicle_id": vehicle_id,
+            "driver_id": driver_id,
             "status": "Scheduled",
         }
         self.db.table("route_assignment").insert(assignment_payload).execute()
@@ -278,22 +263,21 @@ class RoutingService:
         self.db.table("route").update(update_payload).eq("route_id", route_id).execute()
 
         for request in requests:
-            update_payload = {"route_id": route_id}
-            if route_type == "pickup":
-                update_payload["status"] = "Approved"
-            else:
-                update_payload["status"] = "Approved"
+            update_payload = {"route_id": route_id, "status": "Approved"}
+            id_field = "pickup_id" if route_type == "pickup" else "dropoff_id"
+            id_value = request.get("pickup_id") or request.get("dropoff_id")
             self.db.table("pickup_request" if route_type == "pickup" else "dropoff_request").update(update_payload).eq(
-                "pickup_id" if route_type == "pickup" else "dropoff_id",
-                request.get("pickup_id") or request.get("dropoff_id"),
+                id_field, id_value,
             ).execute()
 
         return {"route_id": route_id}
 
     def _build_route_stops(
         self,
+        route_type: str,
         office_lat: float,
         office_lng: float,
+        vehicle: Dict[str, Any],
         requests: List[Dict[str, Any]],
         shift_time: Optional[str],
         stop_dwell: int,
@@ -303,26 +287,48 @@ class RoutingService:
         if not shift_time:
             shift_time = "08:00"
         current_time = datetime.strptime(shift_time, "%H:%M")
-        prev_lat, prev_lng = office_lat, office_lng
+
+        if route_type == "pickup":
+            prev_lat = vehicle.get("parking_lat") or office_lat
+            prev_lng = vehicle.get("parking_lng") or office_lng
+        else:
+            prev_lat, prev_lng = office_lat, office_lng
 
         for request in requests:
             latitude = request.get("pickup_lat") or request.get("drop_lat") or 0.0
             longitude = request.get("pickup_lng") or request.get("drop_lng") or 0.0
             distance = self._haversine_km(prev_lat, prev_lng, latitude, longitude)
             travel_time_min = int((distance / speed_kmph) * 60) if speed_kmph > 0 else 0
-            arrival_time = (current_time + timedelta(minutes=travel_time_min)).strftime("%H:%M")
-            departure_time = (datetime.strptime(arrival_time, "%H:%M") + timedelta(minutes=stop_dwell)).strftime("%H:%M")
+            arrival_time = current_time + timedelta(minutes=travel_time_min)
+            departure_time = arrival_time + timedelta(minutes=stop_dwell)
+            employee_id = request.get("employee_id")
             stops.append({
                 "latitude": latitude,
                 "longitude": longitude,
-                "arrival_time": arrival_time,
-                "departure_time": departure_time,
+                "arrival_time": arrival_time.strftime("%H:%M"),
+                "departure_time": departure_time.strftime("%H:%M"),
                 "distance_from_prev": distance,
                 "travel_time_min": travel_time_min,
                 "stop_dwell_min": stop_dwell,
+                "employee_id": employee_id,
             })
-            current_time = datetime.strptime(departure_time, "%H:%M")
+            current_time = departure_time
             prev_lat, prev_lng = latitude, longitude
+
+        if route_type == "pickup":
+            distance_to_office = self._haversine_km(prev_lat, prev_lng, office_lat, office_lng)
+            travel_time_to_office = int((distance_to_office / speed_kmph) * 60) if speed_kmph > 0 else 0
+            arrival_at_office = current_time + timedelta(minutes=travel_time_to_office)
+            stops.append({
+                "latitude": office_lat,
+                "longitude": office_lng,
+                "arrival_time": arrival_at_office.strftime("%H:%M"),
+                "departure_time": arrival_at_office.strftime("%H:%M"),
+                "distance_from_prev": distance_to_office,
+                "travel_time_min": travel_time_to_office,
+                "stop_dwell_min": 0,
+                "employee_id": None,
+            })
 
         return stops
 

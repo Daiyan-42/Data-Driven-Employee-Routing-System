@@ -9,12 +9,20 @@ import type {
   DriverUpdate,
   DropoffRequest,
   DropoffRequestsListResponse,
+  DropoffRoutingRunPayload,
   Employee,
   EmployeeProfileUpdate,
   EmployeesListResponse,
   PickupRequest,
   PickupRequestsListResponse,
+  PickupRoutingInputResponse,
+  PickupRoutingRunPayload,
+  RouteAssignPayload,
+  RouteAssignmentResponse,
+  RouteDetailResponse,
+  RoutingRunResponse,
   ScheduleResponse,
+  ScheduleSummaryResponse,
   Vehicle,
   VehicleCreate,
   VehiclesListResponse,
@@ -359,5 +367,44 @@ export const employeeApi = {
     const today = new Date().toISOString().split("T")[0];
     const query = new URLSearchParams({ service_date: serviceDate ?? today });
     return request<ScheduleResponse>(`/employees/me/schedule?${query.toString()}`);
+  },
+};
+
+export const adminApi = {
+  getPickupRoutingInput(serviceDate: string, shiftStartTime?: string): Promise<PickupRoutingInputResponse> {
+    const query = new URLSearchParams({ service_date: serviceDate });
+    if (shiftStartTime) query.set("shift_start_time", shiftStartTime);
+    return request<PickupRoutingInputResponse>(`/admin/pickup-routing/input?${query.toString()}`);
+  },
+
+  runPickupRouting(payload: PickupRoutingRunPayload): Promise<RoutingRunResponse> {
+    return request<RoutingRunResponse>("/admin/pickup-routing/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  runDropoffRouting(payload: DropoffRoutingRunPayload): Promise<RoutingRunResponse> {
+    return request<RoutingRunResponse>("/admin/dropoff-routing/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getScheduleSummary(serviceDate: string, shiftTime?: string): Promise<ScheduleSummaryResponse> {
+    const query = new URLSearchParams({ service_date: serviceDate });
+    if (shiftTime) query.set("shift_time", shiftTime);
+    return request<ScheduleSummaryResponse>(`/admin/schedule-summary?${query.toString()}`);
+  },
+
+  getRouteDetail(routeId: number): Promise<RouteDetailResponse> {
+    return request<RouteDetailResponse>(`/admin/routes/${routeId}`);
+  },
+
+  assignRoute(routeId: number, payload: RouteAssignPayload): Promise<RouteAssignmentResponse> {
+    return request<RouteAssignmentResponse>(`/admin/routes/${routeId}/assign`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 };

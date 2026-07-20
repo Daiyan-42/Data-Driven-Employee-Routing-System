@@ -8,11 +8,24 @@ import {
   Navigation, BarChart3, Shield,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { mockRequests, User } from '../../data/mockData';
-import { driverApi, dropoffRequestApi, employeeApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
-import type { Driver, DropoffRequest, PickupRequest, Vehicle } from '../../types/api';
+import { adminApi, driverApi, dropoffRequestApi, employeeApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
+import type { Driver, DropoffRequest, PickupRequest, Vehicle, PickupRoutingInputResponse, RoutingRunResponse, ScheduleSummaryResponse, RouteDetailResponse } from '../../types/api';
+import { InteractiveMap } from '../shared/InteractiveMap';
 
 type AdminView = 'overview' | 'employees' | 'drivers' | 'vehicles' | 'requests' | 'routing';
+
+interface AdminEmployee {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  employeeId: string;
+  department?: string;
+  address?: string;
+}
 
 const SIDEBAR_ITEMS = [
   { id: 'overview' as AdminView, label: 'Overview', icon: BarChart3 },
@@ -27,27 +40,33 @@ export const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [view, setView] = useState<AdminView>('overview');
-  const [employees, setEmployees] = useState<User[]>([]);
+  const [employees, setEmployees] = useState<AdminEmployee[]>([]);
   const [searchQ, setSearchQ] = useState('');
 
   // Modals
   const [addEmpOpen, setAddEmpOpen] = useState(false);
-  const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
-  const [deleteUser, setDeleteUser] = useState<User | null>(null);
-  const [viewEmpDetail, setViewEmpDetail] = useState<User | null>(null);
-  const [routingResult, setRoutingResult] = useState<any | null>(null);
+  const [resetPwdUser, setResetPwdUser] = useState<AdminEmployee | null>(null);
+  const [deleteUser, setDeleteUser] = useState<AdminEmployee | null>(null);
+  const [viewEmpDetail, setViewEmpDetail] = useState<AdminEmployee | null>(null);
+  const [routingResult, setRoutingResult] = useState<ScheduleSummaryResponse | null>(null);
+  const [routingRunResult, setRoutingRunResult] = useState<RoutingRunResponse | null>(null);
   const [selectedShiftFilter, setSelectedShiftFilter] = useState('all');
   const [selectedDateFilter, setSelectedDateFilter] = useState('all');
   const [routingShift, setRoutingShift] = useState('07:00');
-  const [routingDate, setRoutingDate] = useState('2026-07-07');
+  const [routingDate, setRoutingDate] = useState(new Date().toISOString().split('T')[0]);
   const [isRouting, setIsRouting] = useState(false);
+  const [routingType, setRoutingType] = useState<'pickup' | 'dropoff'>('pickup');
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [pickupRequests, setPickupRequests] = useState<PickupRequest[]>([]);
   const [dropoffRequests, setDropoffRequests] = useState<DropoffRequest[]>([]);
+  const [pickupPreview, setPickupPreview] = useState<PickupRoutingInputResponse | null>(null);
+  const [dropoffPreview, setDropoffPreview] = useState<PickupRoutingInputResponse | null>(null);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [requestActionLoading, setRequestActionLoading] = useState(false);
+  const [officeLat, setOfficeLat] = useState(23.7298);
+  const [officeLng, setOfficeLng] = useState(90.4182);
 
   const loadAdminApiData = async () => {
     setApiLoading(true);
@@ -160,45 +179,63 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Simulated routing algorithm
-  const runRoutingAlgorithm = async () => {
+  const loadPreview = async (type: 'pickup' | 'dropoff') => {
+    setApiLoading(true);
+    setApiError(null);
+    try {
+      if (type === 'pickup') {
+        const data = await adminApi.getPickupRoutingInput(routingDate, routingShift);
+        setPickupPreview(data);
+      } else {
+        const data = await adminApi.getPickupRoutingInput(routingDate, routingShift);
+        setDropoffPreview(data);
+      }
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not load preview.');
+    } finally {
+      setApiLoading(false);
+    }
+  };
+
+  const runRouting = async (type: 'pickup' | 'dropoff') => {
     setIsRouting(true);
-    await new Promise(r => setTimeout(r, 2000));
-    const relevant = mockRequests.filter(r => r.shiftTime === routingShift && r.serviceDate === routingDate);
-    setRoutingResult({
-      shift: routingShift,
-      date: routingDate,
-      totalRequests: relevant.length,
-      routes: [
-        {
-          id: 'R-001',
-          vehicle: 'Dhaka Metro-GA 11-2234',
-          driver: 'Jahangir Alam',
-          passengers: relevant.slice(0, 3),
-          stops: [
-            { order: 1, location: 'Banani', lat: 23.7938, lng: 90.4030, eta: '07:15 AM', travel: 'Start' },
-            { order: 2, location: 'Uttara Sector 4', lat: 23.8751, lng: 90.3975, eta: '07:35 AM', travel: '8.2 km • 20 min' },
-            { order: 3, location: 'Office — Motijheel', lat: 23.7298, lng: 90.4182, eta: '08:10 AM', travel: '12.4 km • 35 min' },
-          ],
-          totalDistance: '20.6 km',
-          totalTime: '55 min',
-        },
-        {
-          id: 'R-002',
-          vehicle: 'Dhaka Metro-GA 33-4456',
-          driver: 'Ruhul Amin',
-          passengers: relevant.slice(3),
-          stops: [
-            { order: 1, location: 'Dhanmondi 27', lat: 23.7461, lng: 90.3742, eta: '07:10 AM', travel: 'Start' },
-            { order: 2, location: 'Mirpur 12', lat: 23.8041, lng: 90.3540, eta: '07:40 AM', travel: '9.1 km • 30 min' },
-            { order: 3, location: 'Office — Motijheel', lat: 23.7298, lng: 90.4182, eta: '08:20 AM', travel: '13.0 km • 40 min' },
-          ],
-          totalDistance: '22.1 km',
-          totalTime: '70 min',
-        },
-      ],
-    });
-    setIsRouting(false);
+    setApiError(null);
+    setRoutingResult(null);
+    setRoutingRunResult(null);
+    try {
+      let result: RoutingRunResponse;
+      if (type === 'pickup') {
+        result = await adminApi.runPickupRouting({
+          service_date: routingDate,
+          shift_start_time: routingShift,
+          office_lat: officeLat,
+          office_lng: officeLng,
+        });
+      } else {
+        result = await adminApi.runDropoffRouting({
+          service_date: routingDate,
+          shift_end_time: routingShift,
+          office_lat: officeLat,
+          office_lng: officeLng,
+        });
+      }
+      setRoutingRunResult(result);
+      setRoutingType(type);
+      await loadScheduleSummary();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not run routing.');
+    } finally {
+      setIsRouting(false);
+    }
+  };
+
+  const loadScheduleSummary = async () => {
+    try {
+      const summary = await adminApi.getScheduleSummary(routingDate, routingShift);
+      setRoutingResult(summary);
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not load schedule summary.');
+    }
   };
 
   // Add employee
@@ -206,7 +243,7 @@ export const AdminDashboard: React.FC = () => {
 
   const handleAddEmployee = () => {
     if (!newEmp.name || !newEmp.email || !newEmp.password) return;
-    const emp: User = {
+    const emp: AdminEmployee = {
       id: `emp-${Date.now()}`,
       name: newEmp.name,
       email: newEmp.email,
@@ -215,7 +252,6 @@ export const AdminDashboard: React.FC = () => {
       department: newEmp.department,
       role: 'employee',
       employeeId: `EMP-${String(employees.length + 6).padStart(3, '0')}`,
-      password: newEmp.password,
     };
     setEmployees(prev => [...prev, emp]);
     setNewEmp({ name: '', email: '', phone: '', address: '', department: '', password: '' });
@@ -356,18 +392,18 @@ export const AdminDashboard: React.FC = () => {
                 <div className="rounded-xl border border-white/8 bg-card p-6">
                   <h3 className="text-base font-semibold text-white mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Recent Requests</h3>
                   <div className="space-y-3">
-                    {mockRequests.slice(0, 5).map(r => (
-                      <div key={r.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                    {allRequests.slice(0, 5).map(r => (
+                      <div key={`${r.kind}-${r.id}`} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
                         <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${r.status === 'routed' ? 'bg-emerald-500' : r.status === 'pending' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                          <div className={`w-2 h-2 rounded-full ${r.status === 'Approved' ? 'bg-emerald-500' : r.status === 'Pending' ? 'bg-amber-500' : 'bg-red-500'}`} />
                           <div>
                             <p className="text-sm text-white font-medium">{r.employeeName}</p>
-                            <p className="text-xs text-slate-600">{r.serviceDate} · {r.shiftTime}</p>
+                            <p className="text-xs text-slate-600">{r.serviceDate} · {r.shiftTime} · {r.kind}</p>
                           </div>
                         </div>
                         <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          r.status === 'routed' ? 'bg-emerald-500/15 text-emerald-400'
-                          : r.status === 'pending' ? 'bg-amber-500/15 text-amber-400'
+                          r.status === 'Approved' ? 'bg-emerald-500/15 text-emerald-400'
+                          : r.status === 'Pending' ? 'bg-amber-500/15 text-amber-400'
                           : 'bg-red-500/15 text-red-400'
                         }`}>
                           {r.status}
@@ -381,26 +417,23 @@ export const AdminDashboard: React.FC = () => {
                 <div className="rounded-xl border border-white/8 bg-card p-6">
                   <h3 className="text-base font-semibold text-white mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Fleet Status</h3>
                   <div className="space-y-3">
-                    {vehicles.map(v => {
-                      const driver = v.driver_name;
-                      return (
-                        <div key={v.vehicle_id} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
-                          <div className="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/15 flex items-center justify-center">
-                            <Bus className="w-4 h-4 text-sky-400" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-white font-medium">{v.plate_no}</p>
-                            <p className="text-xs text-slate-600">{v.model} · {v.capacity} seats</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-slate-400">{driver?.name || '—'}</p>
-                            <div className={`text-xs px-2 py-0.5 rounded-full mt-1 ${driver ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-500/15 text-slate-500'}`}>
-                              {driver ? 'Assigned' : 'Unassigned'}
-                            </div>
+                    {vehicles.map(v => (
+                      <div key={v.vehicle_id} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
+                        <div className="w-9 h-9 rounded-lg bg-sky-500/10 border border-sky-500/15 flex items-center justify-center">
+                          <Bus className="w-4 h-4 text-sky-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white font-medium">{v.plate_no}</p>
+                          <p className="text-xs text-slate-600">{v.capacity} seats</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-slate-400">{v.driver_name || '—'}</p>
+                          <div className={`text-xs px-2 py-0.5 rounded-full mt-1 ${v.driver_name ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-500/15 text-slate-500'}`}>
+                            {v.driver_name ? 'Assigned' : 'Unassigned'}
                           </div>
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -527,7 +560,7 @@ export const AdminDashboard: React.FC = () => {
                           {vehicle ? (
                             <div>
                               <p className="text-sm text-sky-400 font-medium">{vehicle.plate_no}</p>
-                              <p className="text-xs text-slate-600">{vehicle.model} · {vehicle.type}</p>
+                              <p className="text-xs text-slate-600">{vehicle.plate_no} · {vehicle.capacity} seats</p>
                             </div>
                           ) : <span className="text-slate-600 text-sm">Unassigned</span>}
                         </td>
@@ -677,20 +710,23 @@ export const AdminDashboard: React.FC = () => {
           {/* ─── ROUTING ─── */}
           {view === 'routing' && (
             <div className="space-y-6">
+              {/* Routing controls */}
               <div className="rounded-xl border border-white/8 bg-card p-6">
                 <h3 className="text-base font-semibold text-white mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
                   Run Routing Algorithm
                 </h3>
                 <p className="text-sm text-slate-500 mb-6">
-                  Select a shift time and date to compute optimal vehicle routes for all pending pickup requests.
+                  Select date and shift time, then preview request counts or trigger routing for pickup/dropoff.
                 </p>
-                <div className="flex items-end gap-4 flex-wrap">
+
+                {/* Date and shift selectors */}
+                <div className="flex items-end gap-4 flex-wrap mb-6">
                   <div>
                     <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Date</label>
                     <input
                       type="date"
                       value={routingDate}
-                      onChange={e => setRoutingDate(e.target.value)}
+                      onChange={e => { setRoutingDate(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); setRoutingRunResult(null); }}
                       className="px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                     />
                   </div>
@@ -698,7 +734,7 @@ export const AdminDashboard: React.FC = () => {
                     <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Shift Time</label>
                     <select
                       value={routingShift}
-                      onChange={e => setRoutingShift(e.target.value)}
+                      onChange={e => { setRoutingShift(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); setRoutingRunResult(null); }}
                       className="px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                     >
                       <option value="07:00">07:00</option>
@@ -707,8 +743,48 @@ export const AdminDashboard: React.FC = () => {
                       <option value="22:00">22:00</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Office Lat</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={officeLat}
+                      onChange={e => setOfficeLat(Number(e.target.value))}
+                      className="w-24 px-2 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Office Lng</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={officeLng}
+                      onChange={e => setOfficeLng(Number(e.target.value))}
+                      className="w-24 px-2 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
+                    />
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-3 flex-wrap">
                   <button
-                    onClick={runRoutingAlgorithm}
+                    onClick={() => loadPreview('pickup')}
+                    disabled={apiLoading}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-sky-500/30 text-sky-400 hover:bg-sky-500/10 text-sm font-medium transition disabled:opacity-60"
+                  >
+                    <Eye className="w-4 h-4" />
+                    Preview Pickup
+                  </button>
+                  <button
+                    onClick={() => loadPreview('dropoff')}
+                    disabled={apiLoading}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-sky-500/30 text-sky-400 hover:bg-sky-500/10 text-sm font-medium transition disabled:opacity-60"
+                  >
+                    <Eye className="w-4 h-4" />
+                    Preview Dropoff
+                  </button>
+                  <button
+                    onClick={() => runRouting('pickup')}
                     disabled={isRouting}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm transition disabled:opacity-60"
                   >
@@ -720,77 +796,174 @@ export const AdminDashboard: React.FC = () => {
                     ) : (
                       <>
                         <Play className="w-4 h-4" />
-                        Run Algorithm
+                        Run Pickup Routing
                       </>
                     )}
+                  </button>
+                  <button
+                    onClick={() => runRouting('dropoff')}
+                    disabled={isRouting}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white font-semibold text-sm transition disabled:opacity-60"
+                  >
+                    {isRouting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Computing...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        Run Dropoff Routing
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={loadScheduleSummary}
+                    disabled={apiLoading}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-sm font-medium transition disabled:opacity-60"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    View Results
                   </button>
                 </div>
               </div>
 
-              {routingResult && (
-                <div className="space-y-4">
+              {/* Preview panels */}
+              {(pickupPreview || dropoffPreview) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {pickupPreview && (
+                    <div className="rounded-xl border border-sky-500/20 bg-card p-5">
+                      <h4 className="text-sm font-semibold text-sky-400 mb-3" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Pickup Preview</h4>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div><span className="text-slate-500">Total:</span> <span className="text-white font-semibold">{pickupPreview.total_requests}</span></div>
+                        <div><span className="text-amber-500">Pending:</span> <span className="text-white font-semibold">{pickupPreview.pending}</span></div>
+                        <div><span className="text-emerald-500">Approved:</span> <span className="text-white font-semibold">{pickupPreview.approved}</span></div>
+                        <div><span className="text-red-500">Rejected:</span> <span className="text-white font-semibold">{pickupPreview.rejected}</span></div>
+                      </div>
+                    </div>
+                  )}
+                  {dropoffPreview && (
+                    <div className="rounded-xl border border-emerald-500/20 bg-card p-5">
+                      <h4 className="text-sm font-semibold text-emerald-400 mb-3" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Dropoff Preview</h4>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div><span className="text-slate-500">Total:</span> <span className="text-white font-semibold">{dropoffPreview.total_requests}</span></div>
+                        <div><span className="text-amber-500">Pending:</span> <span className="text-white font-semibold">{dropoffPreview.pending}</span></div>
+                        <div><span className="text-emerald-500">Approved:</span> <span className="text-white font-semibold">{dropoffPreview.approved}</span></div>
+                        <div><span className="text-red-500">Rejected:</span> <span className="text-white font-semibold">{dropoffPreview.rejected}</span></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Routing run result */}
+              {routingRunResult && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
                   <div className="flex items-center gap-3">
                     <CheckCircle className="w-5 h-5 text-emerald-400" />
-                    <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                      Routing Result — {routingResult.date} · {routingResult.shift}
-                    </h3>
-                    <span className="text-xs text-slate-500">{routingResult.totalRequests} requests processed</span>
-                  </div>
-
-                  {routingResult.routes.map((route: any) => (
-                    <div key={route.id} className="rounded-xl border border-white/8 bg-card p-6">
-                      <div className="flex items-start justify-between mb-4">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-mono text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded">{route.id}</span>
-                            <h4 className="text-sm font-semibold text-white">{route.vehicle}</h4>
-                          </div>
-                          <p className="text-xs text-slate-500">Driver: {route.driver}</p>
-                        </div>
-                        <div className="text-right text-xs text-slate-500">
-                          <p>{route.totalDistance}</p>
-                          <p>{route.totalTime}</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        {route.stops.map((stop: any, idx: number) => (
-                          <div key={idx} className="flex items-start gap-3">
-                            <div className="flex flex-col items-center mt-1">
-                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${stop.order === route.stops.length ? 'bg-emerald-500' : 'bg-sky-500'}`}>
-                                {stop.order}
-                              </div>
-                              {idx < route.stops.length - 1 && (
-                                <div className="w-px flex-1 bg-white/10 mt-1 h-5" />
-                              )}
-                            </div>
-                            <div className="flex-1 pb-2">
-                              <p className="text-sm text-white font-medium">{stop.location}</p>
-                              <div className="flex items-center gap-3 mt-0.5">
-                                <span className="text-xs text-slate-500 font-mono">{stop.eta}</span>
-                                {stop.travel !== 'Start' && (
-                                  <span className="text-xs text-slate-700">↗ {stop.travel}</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {route.passengers.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-white/6">
-                          <p className="text-xs text-slate-600 mb-2 uppercase tracking-wider">Passengers ({route.passengers.length})</p>
-                          <div className="flex flex-wrap gap-2">
-                            {route.passengers.map((p: any, idx: number) => (
-                              <span key={idx} className="text-xs px-2 py-1 rounded-full bg-white/6 text-slate-400 border border-white/8">
-                                {p.employeeName}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
+                    <div>
+                      <p className="text-sm font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                        {routingType === 'pickup' ? 'Pickup' : 'Dropoff'} Routing Complete
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {routingRunResult.routes_created} routes · {routingRunResult.employees_assigned} assigned
+                        {routingRunResult.unassigned_pickup_ids.length > 0 && (
+                          <> · <span className="text-amber-400">{routingRunResult.unassigned_pickup_ids.length} unassigned</span></>
+                        )}
+                      </p>
+                      {routingRunResult.message && (
+                        <p className="text-xs text-slate-500 mt-1">{routingRunResult.message}</p>
                       )}
                     </div>
-                  ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Schedule results */}
+              {routingResult && routingResult.routes.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <MapPin className="w-5 h-5 text-sky-400" />
+                    <h3 className="text-base font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                      Routes — {routingDate} · {routingShift}
+                    </h3>
+                    <span className="text-xs text-slate-500">{routingResult.routes.length} route(s)</span>
+                  </div>
+
+                  {routingResult.routes.map((route) => {
+                    const vehicle = vehicles.find(v => v.vehicle_id === route.assignment?.vehicle_id);
+                    const driver = drivers.find(d => d.driver_id === route.assignment?.driver_id);
+                    const sortedStops = [...route.stops].sort((a, b) => a.sequence_order - b.sequence_order);
+                    const mapMarkers = sortedStops.map((stop, i) => ({
+                      position: [stop.latitude, stop.longitude] as [number, number],
+                      label: stop.passengers.length > 0 ? stop.passengers.map(p => p.employee_name || `Emp #${p.employee_id}`).join(', ') : (i === sortedStops.length - 1 ? 'Office' : `Stop ${stop.sequence_order}`),
+                      color: stop.passengers.length > 0 ? '#0EA5E9' : '#10B981',
+                    }));
+
+                    return (
+                      <div key={route.route_id} className="rounded-xl border border-white/8 bg-card overflow-hidden">
+                        <div className="p-5 border-b border-white/6">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-xs font-mono text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded">Route #{route.route_id}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${route.route_type === 'pickup' ? 'bg-sky-500/15 text-sky-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
+                                  {route.route_type}
+                                </span>
+                              </div>
+                              <p className="text-sm text-white font-medium mt-1">{vehicle?.plate_no || 'Unassigned'}</p>
+                              <p className="text-xs text-slate-500">Driver: {driver?.name || '—'}</p>
+                            </div>
+                            <div className="text-right text-xs text-slate-500">
+                              <p>{route.total_distance_km?.toFixed(1)} km</p>
+                              <p>{route.total_travel_time_min} min</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Map */}
+                        <div style={{ padding: '0 16px 16px' }}>
+                          <InteractiveMap
+                            center={sortedStops.length > 0 ? [sortedStops[0].latitude, sortedStops[0].longitude] : [23.7298, 90.4182]}
+                            zoom={12}
+                            markers={mapMarkers}
+                            showRoute={true}
+                            height="280px"
+                          />
+                        </div>
+
+                        {/* Stops list */}
+                        <div className="px-5 pb-5 space-y-2">
+                          {sortedStops.map((stop, idx) => (
+                            <div key={stop.stop_id} className="flex items-start gap-3">
+                              <div className="flex flex-col items-center mt-1">
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${stop.passengers.length === 0 ? 'bg-emerald-500' : 'bg-sky-500'}`}>
+                                  {stop.sequence_order}
+                                </div>
+                                {idx < sortedStops.length - 1 && (
+                                  <div className="w-px flex-1 bg-white/10 mt-1 h-5" />
+                                )}
+                              </div>
+                              <div className="flex-1 pb-2">
+                                <p className="text-sm text-white font-medium">
+                                  {stop.passengers.length === 0 ? 'Office' : stop.passengers.map(p => p.employee_name || `Employee #${p.employee_id}`).join(', ')}
+                                </p>
+                                <p className="text-xs text-slate-500 font-mono">{stop.arrival_time || '—'} → {stop.departure_time || '—'}</p>
+                                <p className="text-xs text-slate-700">{stop.latitude.toFixed(5)}, {stop.longitude.toFixed(5)}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {routingResult && routingResult.routes.length === 0 && (
+                <div className="rounded-xl border border-white/8 bg-card p-8 text-center">
+                  <AlertCircle className="w-8 h-8 text-slate-600 mx-auto mb-3" />
+                  <p className="text-slate-500">No routes found for this date and shift.</p>
                 </div>
               )}
             </div>
