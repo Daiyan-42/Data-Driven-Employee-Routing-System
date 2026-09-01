@@ -1,6 +1,9 @@
 import { apiUrl } from "../config/api";
 import type {
+  AdhocRequestPayload,
+  AdhocRequestView,
   AuthLoginResponse,
+  ChangePasswordRequest,
   Driver,
   DriverAssignmentResponse,
   DriverCreate,
@@ -11,8 +14,10 @@ import type {
   DropoffRequestsListResponse,
   DropoffRoutingRunPayload,
   Employee,
+  EmployeeCreate,
   EmployeeProfileUpdate,
   EmployeesListResponse,
+  MessageResponse,
   PickupRequest,
   PickupRequestsListResponse,
   PickupRoutingInputResponse,
@@ -27,14 +32,40 @@ import type {
   VehicleCreate,
   VehiclesListResponse,
   VehicleUpdate,
+  WeeklyRequestPayload,
+  WeeklyRequestView,
 } from "../types/api";
 
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
+const AUTH_USER_KEY = "auth_user";
 
 const getAccessToken = () => localStorage.getItem(ACCESS_TOKEN_KEY);
 
+// --- Session failure handling -----------------------------------------------
+// If the backend returns 401 on an authenticated call, the stored token is
+// invalid or expired. Clear the saved session and return the user to the login
+// page instead of leaving them stuck on a stale dashboard.
+let authRedirectQueued = false;
+
+const clearStoredAuth = () => {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USER_KEY);
+};
+
+const handleSessionExpired = () => {
+  clearStoredAuth();
+  if (!authRedirectQueued) {
+    authRedirectQueued = true;
+    // Let the auth provider drop the user so ProtectedRoute sends us to
+    // /login — an in-app redirect, no hard page reload required.
+    window.dispatchEvent(new Event("auth:session-expired"));
+  }
+};
+
 const setTokens = (accessToken: string, refreshToken?: string | null) => {
+  authRedirectQueued = false; // a fresh login re-arms the 401 redirect
   localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   if (refreshToken) {
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -68,13 +99,36 @@ const parseError = async (response: Response) => {
 };
 
 const request = async <T>(path: string, init: RequestInit = {}, withAuth = true): Promise<T> => {
-  const response = await fetch(apiUrl(path), {
-    ...init,
-    headers: {
-      ...makeHeaders(withAuth),
-      ...(init.headers ?? {}),
-    },
-  });
+  const method = (init.method ?? 'GET').toUpperCase();
+  // Retry network-level failures (fetch() rejecting — server starting, a
+  // dropped keep-alive, etc.) a few times for idempotent GETs. HTTP errors
+  // (4xx/5xx) and POSTs are never silently retried.
+  const maxAttempts = method === 'GET' ? 3 : 1;
+
+  let response: Response;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetch(apiUrl(path), {
+        ...init,
+        headers: {
+          ...makeHeaders(withAuth),
+          ...(init.headers ?? {}),
+        },
+      });
+      break;
+    } catch {
+      if (attempt >= maxAttempts - 1) {
+        throw new Error('Failed to fetch — the server may be starting up. Please try again.');
+      }
+      await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
+    }
+  }
+
+  if (response.status === 401 && withAuth) {
+    // The token is missing, invalid, or expired — treat the session as dead.
+    handleSessionExpired();
+    throw new Error("Your session has expired. Please sign in again.");
+  }
 
   if (!response.ok) {
     throw new Error(await parseError(response));
@@ -142,8 +196,10 @@ export const driverApi = {
     });
   },
 
-  getTodayAssignment() {
-    return request<DriverAssignmentResponse>("/drivers/me/assignments/today");
+  getTodayAssignment(serviceDate?: string) {
+    const query = new URLSearchParams();
+    if (serviceDate) query.set("service_date", serviceDate);
+    return request<DriverAssignmentResponse>(`/drivers/me/assignments/today?${query.toString()}`);
   },
 
   startAssignment(assignmentId: number) {
@@ -368,6 +424,48 @@ export const employeeApi = {
     const query = new URLSearchParams({ service_date: serviceDate ?? today });
     return request<ScheduleResponse>(`/employees/me/schedule?${query.toString()}`);
   },
+
+  /** Admin-only: create an employee account with a temporary password. */
+  add(payload: EmployeeCreate): Promise<Employee> {
+    return request<Employee>("/admin/employees", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** Employee changes their own password (current password required). */
+  changePassword(payload: ChangePasswordRequest): Promise<MessageResponse> {
+    return request<MessageResponse>("/employees/me/password", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
+export const weeklyRequestApi = {
+  current(): Promise<WeeklyRequestView> {
+    return request<WeeklyRequestView>("/weekly-requests/current");
+  },
+
+  save(payload: WeeklyRequestPayload): Promise<WeeklyRequestView> {
+    return request<WeeklyRequestView>("/weekly-requests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
+export const adhocRequestApi = {
+  current(): Promise<AdhocRequestView> {
+    return request<AdhocRequestView>("/adhoc-requests/current");
+  },
+
+  save(payload: AdhocRequestPayload): Promise<AdhocRequestView> {
+    return request<AdhocRequestView>("/adhoc-requests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 export const adminApi = {
@@ -405,6 +503,21 @@ export const adminApi = {
     return request<RouteAssignmentResponse>(`/admin/routes/${routeId}/assign`, {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  /** Admin-only: overwrite an employee's password with a new temporary value. */
+  resetEmployeePassword(userId: number, newPassword: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/admin/employees/${userId}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+  },
+
+  /** Admin-only: deactivate an employee (soft delete — keeps history, blocks login). */
+  deleteEmployee(userId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/admin/employees/${userId}`, {
+      method: "DELETE",
     });
   },
 };

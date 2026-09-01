@@ -5,6 +5,8 @@ from app.database import supabase
 from app.dependencies import get_current_user, TokenData
 from app.models.common import paginate
 from app.models.request import (
+    AdhocRequestCreate,
+    AdhocRequestView,
     DropoffRequestCreate,
     DropoffRequestResponse,
     DropoffRequestsListResponse,
@@ -13,6 +15,8 @@ from app.models.request import (
     PickupRequestResponse,
     PickupRequestsListResponse,
     PickupRequestUpdate,
+    WeeklyRequestCreate,
+    WeeklyRequestView,
 )
 from app.services.request_service import RequestService
 
@@ -102,3 +106,37 @@ def delete_dropoff(
     svc: RequestService = Depends(_svc)
 ):
     return svc.delete_my_dropoff(dropoff_id, current_user.user_id)
+
+# ── Weekly Fri/Sat requests ─────────────────────────────────────
+
+@router.get("/weekly-requests/current", response_model=WeeklyRequestView)
+def current_weekly_request(
+    current_user: TokenData = Depends(get_current_user),
+    svc: RequestService = Depends(_svc)
+):
+    return svc.get_current_weekly_request(current_user.user_id)
+
+@router.post("/weekly-requests", response_model=WeeklyRequestView, status_code=201)
+def save_weekly_request(
+    body: WeeklyRequestCreate,
+    current_user: TokenData = Depends(get_current_user),
+    svc: RequestService = Depends(_svc)
+):
+    return svc.save_weekly_request(current_user.user_id, body)
+
+# ── Ad-hoc requests (same-day, before 7 PM) ────────────────────
+
+@router.get("/adhoc-requests/current", response_model=AdhocRequestView)
+def current_adhoc_request(
+    current_user: TokenData = Depends(get_current_user),
+    svc: RequestService = Depends(_svc)
+):
+    return svc.get_current_adhoc(current_user.user_id)
+
+@router.post("/adhoc-requests", response_model=AdhocRequestView, status_code=201)
+def save_adhoc_request(
+    body: AdhocRequestCreate,
+    current_user: TokenData = Depends(get_current_user),
+    svc: RequestService = Depends(_svc)
+):
+    return svc.save_adhoc(current_user.user_id, body)

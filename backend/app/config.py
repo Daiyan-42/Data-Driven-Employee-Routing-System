@@ -16,6 +16,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("jwt_expire_minutes", "access_token_expire_minutes"),
     )
 
+    # Auto-routing scheduler: how often the background loop checks for a
+    # completed request week that still needs routing.
+    routing_check_interval_seconds: int = 60
+
+    # Dev/test flag: bypass the Friday/Saturday request-window check so the
+    # weekly flow can be exercised on any day of the week.
+    request_window_override: bool = False
+
     model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", extra="ignore")
 
 settings = Settings()

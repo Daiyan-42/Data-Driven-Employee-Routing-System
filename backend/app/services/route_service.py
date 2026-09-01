@@ -88,8 +88,11 @@ class RouteService:
         zone = row.get("zone") or {}
         stops = [self._flatten_route_stop(stop) for stop in (row.get("route_stop") or [])]
         assignment = None
-        assignment_rows = row.get("route_assignment") or []
-        if assignment_rows:
+        assignment_rows = row.get("route_assignment")
+        # PostgREST embeds a one-to-one relation as a single object, not a list.
+        if isinstance(assignment_rows, dict):
+            assignment = self._flatten_assignment(assignment_rows)
+        elif isinstance(assignment_rows, list) and assignment_rows:
             assignment = self._flatten_assignment(assignment_rows[0])
 
         return RouteDetailResponse(
@@ -114,7 +117,7 @@ class RouteService:
             passengers.append({
                 "employee_id": employee.get("employee_id"),
                 "employee_name": users.get("name"),
-                "boarded": stop_passenger.get("boarded", False),
+                "boarded": stop_passenger.get("boarded_status", False),
             })
 
         return {

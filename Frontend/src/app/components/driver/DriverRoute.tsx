@@ -292,6 +292,7 @@ export const DriverRoute: React.FC = () => {
                           }))}
                           showRoute={route.stops.length > 1}
                           height="400px"
+                          lazy
                         />
 
                         <div className="mt-4 grid grid-cols-3 gap-3">

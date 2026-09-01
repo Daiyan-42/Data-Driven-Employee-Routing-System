@@ -2,10 +2,24 @@ from fastapi import HTTPException
 from supabase import Client
 from datetime import datetime, time, timedelta
 from app.models.request import (
+    AdhocRequestCreate,
     DropoffRequestCreate,
     DropoffRequestUpdate,
     PickupRequestCreate,
     PickupRequestUpdate,
+    WeeklyRequestCreate,
+)
+from app.services.week_service import (
+    ADHOC_CUTOFF_TIME,
+    NIGHT_SHIFT_HOURS,
+    WEEK_DAY_KEYS,
+    adhoc_window_status,
+    day_key,
+    deadline_for_target,
+    is_within_request_window,
+    next_window_open,
+    request_window_open,
+    target_service_week,
 )
 
 DHAKA_MIN_LAT = 23.55
@@ -147,7 +161,6 @@ class RequestService:
     def create_dropoff(self, user_id: int, data: DropoffRequestCreate):
         employee_id = self._get_employee_id_for_user(user_id)
         self._validate_dhaka_bbox(data.drop_lat, data.drop_lng)
-        self._ensure_shift_has_ended(data.service_date, data.shift_end_time)
         self._ensure_no_duplicate_dropoff(employee_id, data.service_date, data.shift_end_time)
 
         payload = {
@@ -193,7 +206,6 @@ class RequestService:
         next_drop_lng = data.drop_lng if data.drop_lng is not None else req["drop_lng"]
 
         self._validate_dhaka_bbox(next_drop_lat, next_drop_lng)
-        self._ensure_shift_has_ended(next_service_date, next_shift_end_time)
         self._ensure_no_duplicate_dropoff(
             employee_id,
             next_service_date,
@@ -279,6 +291,326 @@ class RequestService:
         self.db.table("dropoff_request").update({"status": "Rejected"}).eq("dropoff_id", dropoff_id).execute()
         return self.get_dropoff_by_id(dropoff_id)
 
+    # ── Weekly Requests ──────────────────────────────────────────
+    #
+    # One request per week, submitted Friday/Saturday for the FOLLOWING week's
+    # Friday & Saturday. Submitting again updates the same rows (upsert), so
+    # only the latest version counts for the routing algorithm.
+
+    def get_current_weekly_request(self, user_id: int):
+        employee_id = self._get_employee_id_for_user(user_id)
+        now = datetime.now()
+        service_days = target_service_week(now.date())
+        window_open = is_within_request_window(now)
+
+        def _day_view(service_date):
+            pickup = self._get_weekly_row("pickup_request", employee_id, service_date)
+            dropoff = self._get_weekly_row("dropoff_request", employee_id, service_date)
+            return {
+                "date": service_date.isoformat(),
+                "pickup": pickup,
+                "dropoff": dropoff,
+            }
+
+        window = {
+            "open": window_open,
+            "opens": datetime.combine(request_window_open(now.date()), time(0, 0)).isoformat(),
+            "closes": deadline_for_target(now.date()).isoformat(),
+            "next_open": next_window_open(now).isoformat(),
+            "closed_reason": (
+                None
+                if window_open
+                else "Weekly requests are only accepted on Friday and Saturday, until Saturday 11:59 PM."
+            ),
+        }
+
+        return {
+            "open": window_open,
+            "window": window,
+            "service_start": service_days[0].isoformat(),
+            "service_end": service_days[-1].isoformat(),
+            "week": {
+                day_key(service_date): _day_view(service_date)
+                for service_date in service_days
+            },
+        }
+
+    def save_weekly_request(self, user_id: int, data: WeeklyRequestCreate):
+        employee_id = self._get_employee_id_for_user(user_id)
+        now = datetime.now()
+        if not is_within_request_window(now):
+            raise HTTPException(
+                status_code=409,
+                detail="Weekly requests are only accepted on Friday and Saturday, until Saturday 11:59 PM",
+            )
+
+        service_days = target_service_week(now.date())
+        days = {}
+        for key, service_date in zip(WEEK_DAY_KEYS, service_days):
+            day = getattr(data, key, None)
+            if day is not None:
+                self._validate_weekly_day(day)
+                days[key] = (service_date, day)
+        if not days:
+            raise HTTPException(status_code=422, detail="At least one day must be provided")
+
+        for key, (service_date, day) in days.items():
+            self._upsert_weekly_day(employee_id, service_date, day)
+
+        # Days the employee removed this week: drop their rows so the updated
+        # request is the only one the algorithm sees.
+        for key, service_date in zip(WEEK_DAY_KEYS, service_days):
+            if key not in days:
+                self._delete_weekly_rows(employee_id, service_date)
+
+        return self.get_current_weekly_request(user_id)
+
+    def _validate_weekly_day(self, day):
+        self._validate_shift_pair(day.shift_start_time, day.shift_end_time)
+        self._validate_dhaka_bbox(day.pickup_lat, day.pickup_lng)
+        self._validate_dhaka_bbox(day.drop_lat, day.drop_lng)
+
+    def _validate_shift_pair(self, start, end):
+        """Overnight shifts (10 PM → 6 AM) may wrap past midnight, so an end that
+        is earlier on the clock than the start is valid; only an equal start/end
+        is meaningless."""
+        if self._normalize_time(start) == self._normalize_time(end):
+            raise HTTPException(
+                status_code=422,
+                detail="Shift start and end must be different (overnight shifts run into the next day)",
+            )
+        self._validate_shift_in_night(start)
+        self._validate_shift_in_night(end)
+
+    def _validate_shift_in_night(self, t):
+        if self._time_to_str(t)[:5] not in NIGHT_SHIFT_HOURS:
+            raise HTTPException(
+                status_code=422,
+                detail="Shift time must be one of: 22:00, 23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00",
+            )
+
+    def _upsert_weekly_day(self, employee_id: int, service_date, day):
+        existing_pickup = self._get_weekly_row_id("pickup_request", employee_id, service_date)
+        pickup_payload = {
+            "employee_id": employee_id,
+            "pickup_lat": day.pickup_lat,
+            "pickup_lng": day.pickup_lng,
+            "shift_start_time": self._time_to_str(day.shift_start_time),
+            "service_date": self._date_to_str(service_date),
+            "request_type": "Regular",
+            "status": "Pending",
+        }
+        if existing_pickup:
+            self.db.table("pickup_request").update(pickup_payload).eq("pickup_id", existing_pickup).execute()
+        else:
+            self.db.table("pickup_request").insert(pickup_payload).execute()
+
+        existing_dropoff = self._get_weekly_row_id("dropoff_request", employee_id, service_date)
+        dropoff_payload = {
+            "employee_id": employee_id,
+            "drop_lat": day.drop_lat,
+            "drop_lng": day.drop_lng,
+            "shift_end_time": self._time_to_str(day.shift_end_time),
+            "service_date": self._date_to_str(service_date),
+            "status": "Pending",
+        }
+        if existing_dropoff:
+            self.db.table("dropoff_request").update(dropoff_payload).eq("dropoff_id", existing_dropoff).execute()
+        else:
+            self.db.table("dropoff_request").insert(dropoff_payload).execute()
+
+    def _get_weekly_row(self, table: str, employee_id: int, service_date):
+        """Most recent weekly row (pickup or dropoff) for a target date.
+
+        Returns pending OR approved rows — the weekly view must keep showing the
+        employee's request after routing flips it to Approved, so the form stays
+        in edit mode with the submitted details.
+        """
+        id_col = "pickup_id" if table == "pickup_request" else "dropoff_id"
+        query = (
+            self.db.table(table)
+            .select(
+                "*, "
+                "employee(employee_id, users(name)), "
+                "zone(zone_name)"
+            )
+            .eq("employee_id", employee_id)
+            .eq("service_date", self._date_to_str(service_date))
+            .in_("status", ("Pending", "Approved"))
+        )
+        if table == "pickup_request":
+            query = query.eq("request_type", "Regular")
+        res = query.order("created_at", desc=True).limit(1).execute()
+        if not res.data:
+            return None
+        return self._flatten_pickup(res.data[0]) if table == "pickup_request" else self._flatten_dropoff(res.data[0])
+
+    def _get_weekly_row_id(self, table: str, employee_id: int, service_date):
+        id_col = "pickup_id" if table == "pickup_request" else "dropoff_id"
+        query = (
+            self.db.table(table)
+            .select(id_col)
+            .eq("employee_id", employee_id)
+            .eq("service_date", self._date_to_str(service_date))
+            .eq("status", "Pending")
+        )
+        if table == "pickup_request":
+            query = query.eq("request_type", "Regular")
+        res = query.order("created_at", desc=True).limit(1).execute()
+        if not res.data:
+            return None
+        return res.data[0][id_col]
+
+    def _delete_weekly_rows(self, employee_id: int, service_date):
+        for table in ("pickup_request", "dropoff_request"):
+            query = (
+                self.db.table(table)
+                .delete()
+                .eq("employee_id", employee_id)
+                .eq("service_date", self._date_to_str(service_date))
+                .eq("status", "Pending")
+            )
+            if table == "pickup_request":
+                query = query.eq("request_type", "Regular")
+            query.execute()
+
+    # ── Ad-hoc Requests ─────────────────────────────────────────
+    #
+    # Same-day requests: available only ON the service day, before 7 PM (three
+    # hours before the 10 PM overnight shift). An ad-hoc request changes that
+    # day's shift + pickup/dropoff. It does NOT delete the day's weekly
+    # request — both rows are kept so the weekly one stays as a fallback if the
+    # ad-hoc is rejected. Routing counts only the newest row per (employee,
+    # date) (see routing_service), which is the ad-hoc one — ad-hoc rows are
+    # always inserted after the weekly rows.
+
+    def get_current_adhoc(self, user_id: int):
+        employee_id = self._get_employee_id_for_user(user_id)
+        status = adhoc_window_status()
+        return {
+            "open": status["open"],
+            "service_date": status["service_date"],
+            "cutoff": status["cutoff"],
+            "reason": status["reason"],
+            "existing": {
+                "pickup": self._latest_day_row("pickup_request", employee_id, datetime.now().date()),
+                "dropoff": self._latest_day_row("dropoff_request", employee_id, datetime.now().date()),
+            },
+        }
+
+    def save_adhoc(self, user_id: int, data: AdhocRequestCreate):
+        employee_id = self._get_employee_id_for_user(user_id)
+        now = datetime.now()
+
+        status = adhoc_window_status(now)
+        if not status["open"]:
+            raise HTTPException(status_code=409, detail=status["reason"])
+
+        self._validate_shift_pair(data.shift_start_time, data.shift_end_time)
+        self._validate_dhaka_bbox(data.pickup_lat, data.pickup_lng)
+        self._validate_dhaka_bbox(data.drop_lat, data.drop_lng)
+
+        service_date = now.date()
+        # Remove the employee from today's existing route stops so their driver
+        # manifest is cleared before the nightly re-run rebuilds the route.
+        self._detach_employee_routes(employee_id, service_date)
+        # Turn today's already-routed (weekly) rows back into Pending fallbacks
+        # so the newest-wins rule routes the ad-hoc rows instead.
+        self._reset_day_requests_to_pending(employee_id, service_date)
+        # Replace any earlier ad-hoc pair for today (there is only ever one).
+        self._delete_prior_adhoc(employee_id, service_date)
+
+        self.db.table("pickup_request").insert({
+            "employee_id": employee_id,
+            "pickup_lat": data.pickup_lat,
+            "pickup_lng": data.pickup_lng,
+            "shift_start_time": self._time_to_str(data.shift_start_time),
+            "service_date": self._date_to_str(service_date),
+            "request_type": "Ad-hoc",
+            "status": "Pending",
+        }).execute()
+        self.db.table("dropoff_request").insert({
+            "employee_id": employee_id,
+            "drop_lat": data.drop_lat,
+            "drop_lng": data.drop_lng,
+            "shift_end_time": self._time_to_str(data.shift_end_time),
+            "service_date": self._date_to_str(service_date),
+            "status": "Pending",
+        }).execute()
+
+        return self.get_current_adhoc(user_id)
+
+    def _latest_day_row(self, table: str, employee_id: int, service_date):
+        """Newest Pending/Approved pickup or dropoff for (employee, date).
+
+        For a day with an ad-hoc request this is the ad-hoc row (created today);
+        without one it is the weekly row (created in the request window)."""
+        query = (
+            self.db.table(table)
+            .select(
+                "*, "
+                "employee(employee_id, users(name)), "
+                "zone(zone_name)"
+            )
+            .eq("employee_id", employee_id)
+            .eq("service_date", self._date_to_str(service_date))
+            .in_("status", ("Pending", "Approved"))
+        )
+        res = query.order("created_at", desc=True).limit(1).execute()
+        if not res.data:
+            return None
+        return self._flatten_pickup(res.data[0]) if table == "pickup_request" else self._flatten_dropoff(res.data[0])
+
+    def _detach_employee_routes(self, employee_id: int, service_date):
+        """Delete the employee's stop_passenger rows on today's routes so their
+        driver manifest no longer references them."""
+        routes = self.db.table("route").select("route_id").eq("service_date", self._date_to_str(service_date)).execute()
+        route_ids = [r["route_id"] for r in (routes.data or [])]
+        if not route_ids:
+            return
+        stops = self.db.table("route_stop").select("stop_id").in_("route_id", route_ids).execute()
+        stop_ids = [s["stop_id"] for s in (stops.data or [])]
+        if not stop_ids:
+            return
+        self.db.table("stop_passenger").delete().eq("employee_id", employee_id).in_("stop_id", stop_ids).execute()
+
+    def _reset_day_requests_to_pending(self, employee_id: int, service_date):
+        """Detach the day's already-routed rows (the weekly request) from their
+        route and leave them Pending as a fallback, so the newest-wins routing
+        rule routes the ad-hoc rows instead."""
+        for table in ("pickup_request", "dropoff_request"):
+            self.db.table(table).update({"status": "Pending", "route_id": None}) \
+                .eq("employee_id", employee_id) \
+                .eq("service_date", self._date_to_str(service_date)) \
+                .eq("status", "Approved").execute()
+
+    def _delete_prior_adhoc(self, employee_id: int, service_date):
+        """Remove any previous ad-hoc pair for the day, leaving exactly one
+        ad-hoc request. The weekly request is never touched. Dropoffs carry no
+        request_type, so the ad-hoc dropoff(s) are found by created_at — they
+        are always newer than the weekly rows for the same date."""
+        prior = (
+            self.db.table("pickup_request")
+            .select("created_at")
+            .eq("employee_id", employee_id)
+            .eq("service_date", self._date_to_str(service_date))
+            .eq("request_type", "Ad-hoc")
+            .execute()
+        )
+        rows = prior.data or []
+        if not rows:
+            return
+        min_created = min(r["created_at"] for r in rows)
+        self.db.table("dropoff_request").delete() \
+            .eq("employee_id", employee_id) \
+            .eq("service_date", self._date_to_str(service_date)) \
+            .in_("status", ("Pending", "Approved")) \
+            .gte("created_at", min_created).execute()
+        self.db.table("pickup_request").delete() \
+            .eq("employee_id", employee_id) \
+            .eq("service_date", self._date_to_str(service_date)) \
+            .eq("request_type", "Ad-hoc").execute()
+
     # ── Helpers ─────────────────────────────────────────────────
 
     def get_pickup_by_id(self, pickup_id: int):
@@ -348,14 +680,6 @@ class RequestService:
 
         deadline = datetime.combine(service_date - timedelta(days=1), time(18, 0))
         return "Regular" if datetime.now() <= deadline else "Ad-hoc"
-
-    def _ensure_shift_has_ended(self, service_date, shift_end_time):
-        service_datetime = datetime.combine(
-            self._normalize_date(service_date),
-            self._normalize_time(shift_end_time),
-        )
-        if datetime.now() < service_datetime:
-            raise HTTPException(status_code=409, detail="Dropoff request can be submitted only after shift ends")
 
     def _ensure_adhoc_pickup_window(self, request_type: str, service_date, shift_start_time):
         if request_type != "Ad-hoc":

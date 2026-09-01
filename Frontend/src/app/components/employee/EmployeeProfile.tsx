@@ -170,11 +170,17 @@ export const EmployeeProfile: React.FC = () => {
       setPwdError('Password must be at least 6 characters.');
       return;
     }
-    // Password change is not yet wired to a backend endpoint — show success locally
-    await new Promise((r) => setTimeout(r, 600));
-    setPwdSaved(true);
-    setPwdForm({ current: '', next: '', confirm: '' });
-    setTimeout(() => setPwdSaved(false), 3000);
+    try {
+      await employeeApi.changePassword({
+        current_password: pwdForm.current,
+        new_password: pwdForm.next,
+      });
+      setPwdSaved(true);
+      setPwdForm({ current: '', next: '', confirm: '' });
+      setTimeout(() => setPwdSaved(false), 3000);
+    } catch (err) {
+      setPwdError(err instanceof Error ? err.message : 'Could not change password.');
+    }
   };
 
   // ── Loading / error states ─────────────────────────────────────────────────

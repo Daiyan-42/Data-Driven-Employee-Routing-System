@@ -1,7 +1,7 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from supabase import Client
 
-from app.models.employee import EmployeeProfileUpdate
+from app.models.employee import EmployeeCreate, EmployeeProfileUpdate
 
 
 class EmployeeService:
@@ -54,6 +54,88 @@ class EmployeeService:
             "vehicle": None,
             "routing_done": False,
         }
+
+    # --- Admin account management -------------------------------------------
+
+    def create_employee(self, data: EmployeeCreate) -> dict:
+        # 1. Email must be unique (same check as DriverService.create)
+        existing = (
+            self.db.table("users")
+            .select("user_id")
+            .eq("email", data.email.strip())
+            .execute()
+        )
+        if existing.data:
+            raise HTTPException(status_code=409, detail="Email already in use")
+
+        # 2. Insert the login account
+        user_res = (
+            self.db.table("users")
+            .insert({
+                "name": data.name.strip(),
+                "email": data.email.strip(),
+                "phone": data.phone,
+                "password_hash": data.password,  # stored as-is (plaintext, per project model)
+                "role": "Employee",
+                "status": "Active",
+            })
+            .execute()
+        )
+        user_id = user_res.data[0]["user_id"]
+
+        # 3. Insert the employee profile row
+        self.db.table("employee").insert({
+            "user_id": user_id,
+            "is_active": True,
+        }).execute()
+
+        return self.get_profile(user_id)
+
+    def reset_password(self, user_id: int, new_password: str) -> dict:
+        # Verifies the target is an employee; never reads or returns the
+        # existing hash — the admin can only overwrite it.
+        self._get_employee_or_404(user_id)
+        self.db.table("users").update({"password_hash": new_password}).eq(
+            "user_id", user_id
+        ).execute()
+        return {"message": "Password reset"}
+
+    def deactivate(self, user_id: int) -> dict:
+        """Soft delete: the employee keeps their request/routing history but
+        can no longer log in. (Hard-deleting would break FK references from
+        pickup_request/dropoff_request/stop_passenger.)"""
+        self._get_employee_or_404(user_id)
+        self.db.table("users").update({"status": "Inactive"}).eq(
+            "user_id", user_id
+        ).execute()
+        self.db.table("employee").update({"is_active": False}).eq(
+            "user_id", user_id
+        ).execute()
+        return {"message": "Employee deactivated"}
+
+    # --- Employee self-service ----------------------------------------------
+
+    def change_password(self, user_id: int, current_password: str, new_password: str) -> dict:
+        res = (
+            self.db.table("users")
+            .select("password_hash")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if current_password != res.data[0]["password_hash"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect",
+            )
+
+        self.db.table("users").update({"password_hash": new_password}).eq(
+            "user_id", user_id
+        ).execute()
+        return {"message": "Password updated"}
 
     def get_profile(self, user_id: int) -> dict:
         user_res = (

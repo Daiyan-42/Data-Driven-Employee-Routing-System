@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,11 +15,29 @@ from app.routers import (
     pickup_requests,
     vehicles,
 )
+from app.scheduler import start_routing_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Background loop that auto-routes each week's requests after the
+    # Saturday 11:59 PM deadline.
+    scheduler_task = asyncio.create_task(start_routing_scheduler())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+
 
 app = FastAPI(
     title="Employee Routing System — Backend",
     version="1.0.0",
     description="Admin manages drivers, vehicles and request approvals",
+    lifespan=lifespan,
 )
 
 # Allow frontend dev server

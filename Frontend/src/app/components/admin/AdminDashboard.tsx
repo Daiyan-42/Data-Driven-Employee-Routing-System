@@ -4,7 +4,7 @@ import {
   Users, Car, Truck, ClipboardList, Route, LogOut,
   Plus, Trash2, Key, Eye, Search, Filter, ChevronDown,
   Bus, MapPin, Clock, CheckCircle, AlertCircle, Play,
-  X, Edit, Phone, Mail, Building2, Hash, UserCog,
+  X, Edit, Phone, Mail, Hash, UserCog,
   Navigation, BarChart3, Shield,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -23,8 +23,7 @@ interface AdminEmployee {
   latitude?: number | null;
   longitude?: number | null;
   employeeId: string;
-  department?: string;
-  address?: string;
+  status?: string;
 }
 
 const SIDEBAR_ITEMS = [
@@ -46,13 +45,17 @@ export const AdminDashboard: React.FC = () => {
   // Modals
   const [addEmpOpen, setAddEmpOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<AdminEmployee | null>(null);
+  const [resetPwdNew, setResetPwdNew] = useState('');
+  const [resetPwdError, setResetPwdError] = useState('');
+  const [resetSaving, setResetSaving] = useState(false);
   const [deleteUser, setDeleteUser] = useState<AdminEmployee | null>(null);
+  const [actionSaving, setActionSaving] = useState(false);
   const [viewEmpDetail, setViewEmpDetail] = useState<AdminEmployee | null>(null);
   const [routingResult, setRoutingResult] = useState<ScheduleSummaryResponse | null>(null);
   const [routingRunResult, setRoutingRunResult] = useState<RoutingRunResponse | null>(null);
   const [selectedShiftFilter, setSelectedShiftFilter] = useState('all');
   const [selectedDateFilter, setSelectedDateFilter] = useState('all');
-  const [routingShift, setRoutingShift] = useState('07:00');
+  const [routingShift, setRoutingShift] = useState('22:00');
   const [routingDate, setRoutingDate] = useState(new Date().toISOString().split('T')[0]);
   const [isRouting, setIsRouting] = useState(false);
   const [routingType, setRoutingType] = useState<'pickup' | 'dropoff'>('pickup');
@@ -88,6 +91,7 @@ export const AdminDashboard: React.FC = () => {
         latitude: emp.home_lat ?? undefined,
         longitude: emp.home_lng ?? undefined,
         employeeId: String(emp.employee_id),
+        status: emp.status,
       })));
       setDrivers(driverRes.drivers);
       setVehicles(vehicleRes.vehicles);
@@ -239,35 +243,72 @@ export const AdminDashboard: React.FC = () => {
   };
 
   // Add employee
-  const [newEmp, setNewEmp] = useState({ name: '', email: '', phone: '', address: '', department: '', password: '' });
+  const [newEmp, setNewEmp] = useState({ name: '', email: '', phone: '', password: '' });
+  const [addSaving, setAddSaving] = useState(false);
 
-  const handleAddEmployee = () => {
-    if (!newEmp.name || !newEmp.email || !newEmp.password) return;
-    const emp: AdminEmployee = {
-      id: `emp-${Date.now()}`,
-      name: newEmp.name,
-      email: newEmp.email,
-      phone: newEmp.phone,
-      address: newEmp.address,
-      department: newEmp.department,
-      role: 'employee',
-      employeeId: `EMP-${String(employees.length + 6).padStart(3, '0')}`,
-    };
-    setEmployees(prev => [...prev, emp]);
-    setNewEmp({ name: '', email: '', phone: '', address: '', department: '', password: '' });
-    setAddEmpOpen(false);
+  const handleAddEmployee = async () => {
+    if (!newEmp.name.trim() || !newEmp.email.trim() || !newEmp.password) return;
+    if (newEmp.password.length < 6) {
+      setApiError('Password must be at least 6 characters.');
+      return;
+    }
+    setAddSaving(true);
+    setApiError(null);
+    try {
+      await employeeApi.add({
+        name: newEmp.name.trim(),
+        email: newEmp.email.trim(),
+        phone: newEmp.phone.trim() || undefined,
+        password: newEmp.password,
+      });
+      setNewEmp({ name: '', email: '', phone: '', password: '' });
+      setAddEmpOpen(false);
+      await loadAdminApiData();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not add employee.');
+    } finally {
+      setAddSaving(false);
+    }
   };
 
-  const handleDeleteEmployee = () => {
+  const handleDeleteEmployee = async () => {
     if (!deleteUser) return;
-    setEmployees(prev => prev.filter(e => e.id !== deleteUser.id));
-    setDeleteUser(null);
+    setActionSaving(true);
+    setApiError(null);
+    try {
+      await adminApi.deleteEmployee(Number(deleteUser.id));
+      setDeleteUser(null);
+      await loadAdminApiData();
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not deactivate employee.');
+    } finally {
+      setActionSaving(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetPwdUser) return;
+    if (resetPwdNew.length < 6) {
+      setResetPwdError('Password must be at least 6 characters.');
+      return;
+    }
+    setResetPwdError('');
+    setResetSaving(true);
+    setApiError(null);
+    try {
+      await adminApi.resetEmployeePassword(Number(resetPwdUser.id), resetPwdNew);
+      setResetPwdNew('');
+      setResetPwdUser(null);
+    } catch (err) {
+      setResetPwdError(err instanceof Error ? err.message : 'Could not reset password.');
+    } finally {
+      setResetSaving(false);
+    }
   };
 
   const filteredEmployees = employees.filter(e =>
     e.name.toLowerCase().includes(searchQ.toLowerCase()) ||
-    e.email.toLowerCase().includes(searchQ.toLowerCase()) ||
-    (e.department || '').toLowerCase().includes(searchQ.toLowerCase())
+    e.email.toLowerCase().includes(searchQ.toLowerCase())
   );
 
   const StatCard = ({ label, value, icon: Icon, color, sub }: any) => (
@@ -468,9 +509,7 @@ export const AdminDashboard: React.FC = () => {
                     <tr className="border-b border-white/6">
                       <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Employee</th>
                       <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">ID</th>
-                      <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Department</th>
                       <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
-                      <th className="text-left px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Address</th>
                       <th className="text-right px-6 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
@@ -482,16 +521,21 @@ export const AdminDashboard: React.FC = () => {
                             <div className="w-8 h-8 rounded-full bg-sky-500/15 border border-sky-500/20 flex items-center justify-center text-xs font-bold text-sky-400">
                               {emp.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                             </div>
-                            <span className="text-sm font-medium text-white">{emp.name}</span>
+                            <div>
+                              <span className="text-sm font-medium text-white">{emp.name}</span>
+                              {emp.status === 'Inactive' && (
+                                <span className="ml-2 inline-block text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 border border-slate-500/20 text-slate-400 uppercase tracking-wide">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-xs text-slate-500 font-mono">{emp.employeeId || '—'}</td>
-                        <td className="px-6 py-4 text-sm text-slate-400">{emp.department || '—'}</td>
                         <td className="px-6 py-4">
                           <p className="text-xs text-slate-400">{emp.email}</p>
                           <p className="text-xs text-slate-600">{emp.phone}</p>
                         </td>
-                        <td className="px-6 py-4 text-xs text-slate-500 max-w-[180px] truncate">{emp.address || '—'}</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-1">
                             <button
@@ -737,10 +781,15 @@ export const AdminDashboard: React.FC = () => {
                       onChange={e => { setRoutingShift(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); setRoutingRunResult(null); }}
                       className="px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                     >
-                      <option value="07:00">07:00</option>
-                      <option value="10:00">10:00</option>
-                      <option value="19:00">19:00</option>
                       <option value="22:00">22:00</option>
+                      <option value="23:00">23:00</option>
+                      <option value="00:00">00:00</option>
+                      <option value="01:00">01:00</option>
+                      <option value="02:00">02:00</option>
+                      <option value="03:00">03:00</option>
+                      <option value="04:00">04:00</option>
+                      <option value="05:00">05:00</option>
+                      <option value="06:00">06:00</option>
                     </select>
                   </div>
                   <div>
@@ -929,6 +978,7 @@ export const AdminDashboard: React.FC = () => {
                             markers={mapMarkers}
                             showRoute={true}
                             height="280px"
+                            lazy
                           />
                         </div>
 
@@ -988,8 +1038,6 @@ export const AdminDashboard: React.FC = () => {
                 { label: 'Full Name', field: 'name', placeholder: 'e.g. Rafiqul Islam', type: 'text' },
                 { label: 'Email', field: 'email', placeholder: 'email@company.com', type: 'email' },
                 { label: 'Phone', field: 'phone', placeholder: '+880-17xx-xxxxxx', type: 'text' },
-                { label: 'Department', field: 'department', placeholder: 'e.g. Engineering', type: 'text' },
-                { label: 'Address', field: 'address', placeholder: 'Home address', type: 'text' },
                 { label: 'Temporary Password', field: 'password', placeholder: 'Set initial password', type: 'password' },
               ].map(({ label, field, placeholder, type }) => (
                 <div key={field}>
@@ -1004,12 +1052,19 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               ))}
             </div>
+            <p className="text-xs text-slate-600 mt-3">
+              Give the temporary password to the employee offline. They can change it after logging in.
+            </p>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setAddEmpOpen(false)} className="flex-1 py-2.5 rounded-lg border border-white/10 text-slate-400 hover:text-white hover:border-white/20 text-sm transition">
                 Cancel
               </button>
-              <button onClick={handleAddEmployee} className="flex-1 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm transition">
-                Add Employee
+              <button
+                onClick={handleAddEmployee}
+                disabled={addSaving}
+                className="flex-1 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm transition disabled:opacity-60"
+              >
+                {addSaving ? 'Adding…' : 'Add Employee'}
               </button>
             </div>
           </div>
@@ -1028,18 +1083,26 @@ export const AdminDashboard: React.FC = () => {
             </div>
             <p className="text-sm text-slate-400 mb-4">
               Set a new temporary password for <span className="text-white font-medium">{resetPwdUser.name}</span>.
+              They'll need to log in with this — you can't see their current password.
             </p>
             <input
-              type="text"
-              placeholder="New password"
-              className="w-full px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white placeholder:text-slate-700 text-sm focus:outline-none focus:border-amber-500/40 transition mb-6"
+              type="password"
+              value={resetPwdNew}
+              onChange={e => { setResetPwdNew(e.target.value); setResetPwdError(''); }}
+              placeholder="New password (at least 6 characters)"
+              className="w-full px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white placeholder:text-slate-700 text-sm focus:outline-none focus:border-amber-500/40 transition mb-2"
             />
+            {resetPwdError && <p className="text-xs text-red-400 mb-4">{resetPwdError}</p>}
             <div className="flex gap-3">
               <button onClick={() => setResetPwdUser(null)} className="flex-1 py-2.5 rounded-lg border border-white/10 text-slate-400 text-sm hover:text-white hover:border-white/20 transition">
                 Cancel
               </button>
-              <button onClick={() => setResetPwdUser(null)} className="flex-1 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition">
-                Reset Password
+              <button
+                onClick={handleResetPassword}
+                disabled={resetSaving}
+                className="flex-1 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition disabled:opacity-60"
+              >
+                {resetSaving ? 'Resetting…' : 'Reset Password'}
               </button>
             </div>
           </div>
@@ -1057,14 +1120,19 @@ export const AdminDashboard: React.FC = () => {
               <h3 className="text-lg font-bold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Delete Employee</h3>
             </div>
             <p className="text-sm text-slate-400 mb-6">
-              Are you sure you want to remove <span className="text-white font-medium">{deleteUser.name}</span>? This action cannot be undone.
+              Deactivate <span className="text-white font-medium">{deleteUser.name}</span>? They won't be able to log
+              in, and their account can be re-enabled later. Their request history is kept.
             </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteUser(null)} className="flex-1 py-2.5 rounded-lg border border-white/10 text-slate-400 text-sm hover:text-white hover:border-white/20 transition">
                 Cancel
               </button>
-              <button onClick={handleDeleteEmployee} className="flex-1 py-2.5 rounded-lg bg-red-500 hover:bg-red-400 text-white font-semibold text-sm transition">
-                Delete
+              <button
+                onClick={handleDeleteEmployee}
+                disabled={actionSaving}
+                className="flex-1 py-2.5 rounded-lg bg-red-500 hover:bg-red-400 text-white font-semibold text-sm transition disabled:opacity-60"
+              >
+                {actionSaving ? 'Deactivating…' : 'Deactivate'}
               </button>
             </div>
           </div>
@@ -1087,15 +1155,13 @@ export const AdminDashboard: React.FC = () => {
               </div>
               <div>
                 <p className="text-lg font-bold text-white">{viewEmpDetail.name}</p>
-                <p className="text-sm text-slate-500">{viewEmpDetail.employeeId} · {viewEmpDetail.department}</p>
+                <p className="text-sm text-slate-500">ID {viewEmpDetail.employeeId}</p>
               </div>
             </div>
             <div className="space-y-3">
               {[
                 { icon: Mail, label: 'Email', value: viewEmpDetail.email },
-                { icon: Phone, label: 'Phone', value: viewEmpDetail.phone },
-                { icon: MapPin, label: 'Address', value: viewEmpDetail.address || '—' },
-                { icon: Building2, label: 'Department', value: viewEmpDetail.department || '—' },
+                { icon: Phone, label: 'Phone', value: viewEmpDetail.phone || '—' },
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} className="flex items-start gap-3">
                   <Icon className="w-4 h-4 text-slate-600 mt-0.5" />

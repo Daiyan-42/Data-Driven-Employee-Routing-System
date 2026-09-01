@@ -7,8 +7,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { AdminLoginPage } from './components/auth/AdminLoginPage';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 
-import { PickupRequestForm } from './components/employee/PickupRequestForm';
-import { DropoffRequestForm } from './components/employee/DropoffRequestForm';
+import { PickupDropoffRequestForm } from './components/employee/PickupDropoffRequestForm';
 import { AdhocRequestForm } from './components/employee/AdhocRequestForm';
 import { MyRequests } from './components/employee/MyRequests';
 import { EmployeeProfile } from './components/employee/EmployeeProfile';
@@ -82,18 +81,10 @@ const AppRoutes: React.FC = () => {
         }
       />
       <Route
-        path="/employee/pickup"
+        path="/employee/request"
         element={
           <ProtectedRoute requiredRole="employee">
-            <PickupRequestForm />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/employee/dropoff"
-        element={
-          <ProtectedRoute requiredRole="employee">
-            <DropoffRequestForm />
+            <PickupDropoffRequestForm />
           </ProtectedRoute>
         }
       />

@@ -10,6 +10,7 @@ from app.models.route import (
     PickupRoutingRunPayload,
     RoutingRunResponse,
 )
+from app.services.week_service import OFFICE_LOCATION
 
 
 class RoutingService:
@@ -62,20 +63,184 @@ class RoutingService:
         )
 
     def run_pickup_routing(self, payload: PickupRoutingRunPayload) -> RoutingRunResponse:
+        """Run real pickup routing for a service date (and optional shift)."""
+        requests = self._get_routing_requests(
+            "pickup_request",
+            "service_date",
+            payload.service_date,
+            "shift_start_time",
+            payload.shift_start_time,
+            "Pending",
+        )
+        result = self._create_routes_for_requests(
+            requests=requests,
+            vehicles=self._get_active_vehicles(),
+            route_type="pickup",
+            shift_time=payload.shift_start_time,
+            office_lat=payload.office_lat,
+            office_lng=payload.office_lng,
+            stop_dwell=payload.stop_dwell_minutes,
+            speed_kmph=payload.average_speed_kmph,
+        )
         return RoutingRunResponse(
-            routes_created=3,
-            employees_assigned=12,
-            unassigned_pickup_ids=[],
-            message="Dummy response — algorithm not yet integrated.",
+            routes_created=len(result["routes"]),
+            employees_assigned=result["assigned_count"],
+            unassigned_pickup_ids=result["unassigned_ids"],
+            message=f"Pickup routing complete for {payload.service_date}.",
         )
 
     def run_dropoff_routing(self, payload: DropoffRoutingRunPayload) -> RoutingRunResponse:
-        return RoutingRunResponse(
-            routes_created=2,
-            employees_assigned=8,
-            unassigned_pickup_ids=[],
-            message="Dummy response — algorithm not yet integrated.",
+        """Run real dropoff routing for a service date (and optional shift)."""
+        requests = self._get_routing_requests(
+            "dropoff_request",
+            "service_date",
+            payload.service_date,
+            "shift_end_time",
+            payload.shift_end_time,
+            "Pending",
         )
+        result = self._create_routes_for_requests(
+            requests=requests,
+            vehicles=self._get_active_vehicles(),
+            route_type="dropoff",
+            shift_time=payload.shift_end_time,
+            office_lat=payload.office_lat,
+            office_lng=payload.office_lng,
+            stop_dwell=payload.stop_dwell_minutes,
+            speed_kmph=payload.average_speed_kmph,
+        )
+        return RoutingRunResponse(
+            routes_created=len(result["routes"]),
+            employees_assigned=result["assigned_count"],
+            unassigned_pickup_ids=result["unassigned_ids"],
+            message=f"Dropoff routing complete for {payload.service_date}.",
+        )
+
+    # ── Auto-run driver (used by the scheduler + admin override) ──
+
+    def pending_counts(self, service_date: str) -> dict:
+        """How many un-routed pickup/dropoff requests exist for a service date."""
+        def _count(table: str) -> int:
+            res = (
+                self.db.table(table)
+                .select("*")
+                .eq("service_date", service_date)
+                .eq("status", "Pending")
+                .is_("route_id", None)
+                .execute()
+            )
+            return len(res.data or [])
+        return {
+            "pickup": _count("pickup_request"),
+            "dropoff": _count("dropoff_request"),
+        }
+
+    def run_service_date(
+        self,
+        service_date: str,
+        office_lat: float = OFFICE_LOCATION["lat"],
+        office_lng: float = OFFICE_LOCATION["lng"],
+    ) -> dict:
+        """Route every pending pickup + dropoff request for one service date.
+
+        Idempotent: requests already carrying a route_id are skipped by
+        ``_pending_requests``, and runs with nothing left to do create no routes.
+
+        The per-employee dedupe runs ONCE for the whole day. When an ad-hoc
+        request changes an employee's shift time, the weekly request for the old
+        shift must not be routed separately — only the ad-hoc counts.
+        """
+        office_lat = office_lat or OFFICE_LOCATION["lat"]
+        office_lng = office_lng or OFFICE_LOCATION["lng"]
+        summary = {"service_date": service_date, "pickup": None, "dropoff": None}
+
+        pickup_candidates = self._dedupe_latest_per_employee(
+            self._pending_requests("pickup_request", service_date)
+        )
+        summary["pickup"] = self._route_by_shift(
+            route_type="pickup",
+            time_field="shift_start_time",
+            candidates=pickup_candidates,
+            office_lat=office_lat,
+            office_lng=office_lng,
+            message=f"Pickup routing complete for {service_date}.",
+        )
+
+        dropoff_candidates = self._dedupe_latest_per_employee(
+            self._pending_requests("dropoff_request", service_date)
+        )
+        summary["dropoff"] = self._route_by_shift(
+            route_type="dropoff",
+            time_field="shift_end_time",
+            candidates=dropoff_candidates,
+            office_lat=office_lat,
+            office_lng=office_lng,
+            message=f"Dropoff routing complete for {service_date}.",
+        )
+
+        return summary
+
+    def _pending_requests(self, table_name: str, service_date: str) -> List[Dict[str, Any]]:
+        res = (
+            self.db.table(table_name)
+            .select("*, employee(employee_id, users(name)), zone(zone_name)")
+            .eq("service_date", service_date)
+            .eq("status", "Pending")
+            .is_("route_id", None)
+            .execute()
+        )
+        return res.data or []
+
+    def _route_by_shift(
+        self,
+        route_type: str,
+        time_field: str,
+        candidates: List[Dict[str, Any]],
+        office_lat: float,
+        office_lng: float,
+        message: str,
+    ) -> Optional[RoutingRunResponse]:
+        """Route the already-deduped candidates, grouped by their shift time.
+
+        Each distinct shift becomes its own route (a pickup route per start
+        time, a dropoff route per end time), so an employee whose ad-hoc moved
+        their shift is routed only for the new shift.
+        """
+        if not candidates:
+            return None
+        shifts = sorted({(row.get(time_field) or "")[:5] for row in candidates})
+        summary = None
+        for shift in shifts:
+            group = [row for row in candidates if (row.get(time_field) or "")[:5] == shift]
+            result = self._create_routes_for_requests(
+                requests=group,
+                vehicles=self._get_active_vehicles(),
+                route_type=route_type,
+                shift_time=shift,
+                office_lat=office_lat,
+                office_lng=office_lng,
+                stop_dwell=None,
+                speed_kmph=None,
+            )
+            summary = self._merge_summary(
+                summary,
+                RoutingRunResponse(
+                    routes_created=len(result["routes"]),
+                    employees_assigned=result["assigned_count"],
+                    unassigned_pickup_ids=result["unassigned_ids"],
+                    message=message,
+                ),
+            )
+        return summary
+
+    @staticmethod
+    def _merge_summary(acc: Optional[RoutingRunResponse], result: RoutingRunResponse) -> RoutingRunResponse:
+        if acc is None:
+            return result
+        acc.routes_created += result.routes_created
+        acc.employees_assigned += result.employees_assigned
+        acc.unassigned_pickup_ids.extend(result.unassigned_pickup_ids)
+        return acc
 
     def _get_routing_requests(
         self,
@@ -88,10 +253,31 @@ class RoutingService:
     ) -> List[Dict[str, Any]]:
         query = self.db.table(table_name).select("*, employee(employee_id, users(name)), zone(zone_name)")
         query = query.eq(date_field, date_value).eq("status", status).is_("route_id", None)
-        if time_value is not None:
-            query = query.eq(time_field, time_value)
         res = query.execute()
-        return res.data or []
+        rows = res.data or []
+        # Ad-hoc supersedes the weekly request for routing: only the newest
+        # request per employee per day is routed, so the ad-hoc (always created
+        # after the weekly rows) wins while the weekly row is skipped but kept —
+        # it becomes the fallback if the ad-hoc is later rejected. Dropoffs
+        # carry no request_type, so "newest" is the same rule there.
+        rows = self._dedupe_latest_per_employee(rows)
+        if time_value is not None:
+            # Stored shift times are "HH:MM:SS" (time.isoformat()); match on the
+            # first five chars so both "09:00" and "09:00:00" queries work.
+            needle = str(time_value)[:5]
+            rows = [r for r in rows if (r.get(time_field) or "")[:5] == needle]
+        return rows
+
+    @staticmethod
+    def _dedupe_latest_per_employee(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Keep only the most recently created request per (employee, date)."""
+        latest: Dict[Any, Dict[str, Any]] = {}
+        for r in rows:
+            key = (r.get("employee_id"), r.get("service_date"))
+            cur = latest.get(key)
+            if cur is None or (r.get("created_at") or "") > (cur.get("created_at") or ""):
+                latest[key] = r
+        return list(latest.values())
 
     def _get_active_vehicles(self) -> List[Dict[str, Any]]:
         res = self.db.table("vehicle").select("*, driver(driver_id, user_id, users(name), license_no)").eq("status", "Active").execute()
@@ -242,7 +428,6 @@ class RoutingService:
                 self.db.table("stop_passenger").insert({
                     "stop_id": stop_id,
                     "employee_id": employee_id,
-                    "boarded": False,
                 }).execute()
 
             total_distance += stop.get("distance_from_prev", 0.0)
@@ -286,7 +471,7 @@ class RoutingService:
         stops: List[Dict[str, Any]] = []
         if not shift_time:
             shift_time = "08:00"
-        current_time = datetime.strptime(shift_time, "%H:%M")
+        current_time = datetime.strptime(str(shift_time)[:5], "%H:%M")
 
         if route_type == "pickup":
             prev_lat = vehicle.get("parking_lat") or office_lat
