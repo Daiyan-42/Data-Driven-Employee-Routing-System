@@ -1,89 +1,189 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from '../shared/Sidebar';
 import {
-  Map, Users, Clock, MapPin, CheckCircle, Navigation,
-  ChevronDown, ChevronUp, Car, Coffee, Home, Play, Flag,
+  Users, Clock, MapPin, CheckCircle, Navigation,
+  ChevronDown, ChevronUp, Car, Coffee, Play, Flag, CalendarDays,
+  Loader2, AlertCircle, Route as RouteIcon,
 } from 'lucide-react';
 import { Switch } from '../ui/switch';
 import { InteractiveMap } from '../shared/InteractiveMap';
-import { mockRoutePlans, mockVehicles, mockDrivers } from '../../data/mockData';
-import { useAuth } from '../../context/AuthContext';
+import { AddressText } from '../shared/AddressText';
+import { OFFICE_LOCATION } from '../../data/mockData';
+import { driverApi } from '../../services/transportApi';
+import type { DriverAssignmentRoute } from '../../types/api';
+
+const todayISO = () => new Date().toISOString().split('T')[0];
+
+const shiftDate = (base: string, delta: number) => {
+  const d = new Date(`${base}T00:00:00`);
+  d.setDate(d.getDate() + delta);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const prettyDate = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+const statusInfo = (status?: string | null) => {
+  if (status === 'Completed') return { label: 'Completed', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' };
+  if (status === 'InProgress') return { label: 'In Progress', cls: 'bg-sky-500/15 text-sky-400 border-sky-500/20' };
+  return { label: 'Not Started', cls: 'bg-slate-500/15 text-slate-400 border-slate-500/20' };
+};
 
 export const DriverTodaysTrips: React.FC = () => {
-  const { user } = useAuth();
-  const [routes, setRoutes] = useState(mockRoutePlans);
-  const [expanded, setExpanded] = useState<string[]>([mockRoutePlans[0]?.id]);
+  const [selectedDate, setSelectedDate] = useState(todayISO);
+  const [routes, setRoutes] = useState<DriverAssignmentRoute[]>([]);
+  const [expanded, setExpanded] = useState<number[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const driver = mockDrivers.find(d => d.userId === user?.id);
-  const vehicle = mockVehicles.find(v => v.id === driver?.vehicleId);
+  const loadRoutes = async (date: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await driverApi.getTodayAssignment(date);
+      setRoutes(data.routes ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load assignments');
+      setRoutes([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const myRoutes = routes; // in real app filter by driverId
+  useEffect(() => {
+    void loadRoutes(selectedDate);
+  }, [selectedDate]);
 
-  const toggleExpand = (id: string) => {
+  const toggleExpand = (id: number) => {
     setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  const togglePassenger = (routeId: string, stopId: string, passId: string) => {
-    setRoutes(prev =>
-      prev.map(r =>
-        r.id !== routeId ? r : {
-          ...r,
-          stops: r.stops.map(s =>
-            s.id !== stopId ? s : {
-              ...s,
-              passengers: s.passengers.map(p =>
-                p.id !== passId ? p : { ...p, isBoarded: !p.isBoarded }
-              ),
-            }
-          ),
-        }
-      )
-    );
+  const changeStatus = async (route: DriverAssignmentRoute, next: string) => {
+    const assignmentId = route.assignment?.assignment_id;
+    if (assignmentId == null) return;
+    setError(null);
+    try {
+      if (next === 'InProgress') await driverApi.startAssignment(assignmentId);
+      else await driverApi.completeAssignment(assignmentId);
+      setRoutes(prev =>
+        prev.map(r =>
+          r.route_id === route.route_id && r.assignment
+            ? { ...r, assignment: { ...r.assignment, status: next } }
+            : r,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update trip status');
+    }
   };
 
-  const changeStatus = (routeId: string, status: 'not-started' | 'in-progress' | 'completed') => {
-    setRoutes(prev => prev.map(r => r.id === routeId ? { ...r, status } : r));
+  const boardPassenger = async (route: DriverAssignmentRoute, stopId: number, pax: { employee_id?: number | null; boarded?: boolean | null }) => {
+    if (pax.boarded || pax.employee_id == null) return;
+    setError(null);
+    try {
+      await driverApi.boardPassenger(stopId, pax.employee_id);
+      setRoutes(prev =>
+        prev.map(r =>
+          r.route_id === route.route_id
+            ? {
+                ...r,
+                stops: r.stops.map(s =>
+                  s.stop_id === stopId
+                    ? {
+                        ...s,
+                        passengers: s.passengers.map(p =>
+                          p.employee_id === pax.employee_id ? { ...p, boarded: true } : p,
+                        ),
+                      }
+                    : s,
+                ),
+              }
+            : r,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to mark passenger boarded');
+    }
   };
 
-  const completedCount = myRoutes.filter(r => r.status === 'completed').length;
-  const inProgressRoute = myRoutes.find(r => r.status === 'in-progress');
-  const allDone = myRoutes.length > 0 && completedCount === myRoutes.length;
-
-  const statusStyle: Record<string, string> = {
-    'not-started': 'bg-slate-500/15 text-slate-400 border-slate-500/20',
-    'in-progress': 'bg-sky-500/15 text-sky-400 border-sky-500/20',
-    'completed': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
-  };
-  const statusLabel: Record<string, string> = {
-    'not-started': 'Not Started',
-    'in-progress': 'In Progress',
-    'completed': 'Completed',
-  };
+  const totalPassengers = routes.reduce((a, r) => a + r.stops.reduce((b, s) => b + (s.passengers?.length ?? 0), 0), 0);
+  const boardedPassengers = routes.reduce(
+    (a, r) => a + r.stops.reduce((b, s) => b + (s.passengers?.filter(p => p.boarded).length ?? 0), 0),
+    0,
+  );
+  const completedCount = routes.filter(r => statusInfo(r.assignment?.status).label === 'Completed').length;
+  const inProgressCount = routes.filter(r => statusInfo(r.assignment?.status).label === 'In Progress').length;
+  const allDone = routes.length > 0 && completedCount === routes.length;
+  const anyNotStarted = routes.some(r => statusInfo(r.assignment?.status).label === 'Not Started');
 
   return (
     <Sidebar role="driver">
       <div className="p-6 max-w-7xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-            {"Today's Trips"}
+            Today's Trips
           </h1>
-          <p className="text-slate-500 text-sm">
-            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
+          <p className="text-slate-500 text-sm">{prettyDate(selectedDate)}</p>
+
+          {/* Date selector */}
+          <div className="flex items-center gap-3 mt-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedDate(prev => shiftDate(prev, -1))}
+                className="w-9 h-9 rounded-lg border border-white/8 bg-white/4 hover:bg-white/8 text-slate-300 transition flex items-center justify-center"
+                aria-label="Previous day"
+              >
+                ‹
+              </button>
+              <button
+                onClick={() => setSelectedDate(prev => shiftDate(prev, 1))}
+                className="w-9 h-9 rounded-lg border border-white/8 bg-white/4 hover:bg-white/8 text-slate-300 transition flex items-center justify-center"
+                aria-label="Next day"
+              >
+                ›
+              </button>
+            </div>
+            <div className="flex items-center gap-2 rounded-lg border border-white/8 bg-white/4 px-3 py-2">
+              <CalendarDays className="w-4 h-4 text-slate-500" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => e.target.value && setSelectedDate(e.target.value)}
+                className="bg-transparent text-sm text-slate-300 focus:outline-none"
+              />
+            </div>
+            {selectedDate !== todayISO() && (
+              <button
+                onClick={() => setSelectedDate(todayISO())}
+                className="text-xs text-sky-400 hover:text-sky-300 font-medium"
+              >
+                Back to today
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Status message */}
+        {error && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/8 px-5 py-4 mb-6">
+            <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-red-300/90">{error}</p>
+          </div>
+        )}
+
         {allDone && (
           <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/8 px-5 py-4 mb-6">
-            <Home className="w-5 h-5 text-emerald-400" />
+            <CheckCircle className="w-5 h-5 text-emerald-400" />
             <div>
               <p className="text-sm font-semibold text-emerald-300">All trips completed!</p>
-              <p className="text-xs text-slate-500 mt-0.5">Return to your parking location — Khilgaon Depot. Have a safe drive!</p>
+              <p className="text-xs text-slate-500 mt-0.5">Return to your parking location. Have a safe drive!</p>
             </div>
           </div>
         )}
 
-        {!allDone && !inProgressRoute && myRoutes.some(r => r.status === 'not-started') && (
+        {!allDone && !inProgressCount && anyNotStarted && routes.length > 0 && (
           <div className="flex items-center gap-3 rounded-xl border border-amber-500/15 bg-amber-500/6 px-5 py-4 mb-6">
             <Coffee className="w-5 h-5 text-amber-400" />
             <div>
@@ -97,7 +197,7 @@ export const DriverTodaysTrips: React.FC = () => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="rounded-xl border border-white/8 bg-card px-5 py-4">
             <p className="text-sm text-slate-500 mb-1">Total Trips</p>
-            <p className="text-2xl font-bold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{myRoutes.length}</p>
+            <p className="text-2xl font-bold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{routes.length}</p>
           </div>
           <div className="rounded-xl border border-white/8 bg-card px-5 py-4">
             <p className="text-sm text-slate-500 mb-1">Completed</p>
@@ -105,174 +205,207 @@ export const DriverTodaysTrips: React.FC = () => {
           </div>
           <div className="rounded-xl border border-white/8 bg-card px-5 py-4">
             <p className="text-sm text-slate-500 mb-1">In Progress</p>
-            <p className="text-2xl font-bold text-sky-400" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-              {myRoutes.filter(r => r.status === 'in-progress').length}
-            </p>
+            <p className="text-2xl font-bold text-sky-400" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{inProgressCount}</p>
           </div>
           <div className="rounded-xl border border-white/8 bg-card px-5 py-4">
-            <p className="text-sm text-slate-500 mb-1">Passengers Today</p>
-            <p className="text-2xl font-bold text-amber-400" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-              {myRoutes.reduce((a, r) => a + r.stops.reduce((b, s) => b + s.passengers.length, 0), 0)}
-            </p>
+            <p className="text-sm text-slate-500 mb-1">Passengers</p>
+            <p className="text-2xl font-bold text-amber-400" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{boardedPassengers}/{totalPassengers}</p>
           </div>
         </div>
 
         {/* Trips */}
-        <div className="space-y-4">
-          {myRoutes.map(route => {
-            const isOpen = expanded.includes(route.id);
-            const totalPax = route.stops.reduce((a, s) => a + s.passengers.length, 0);
-            const boardedPax = route.stops.reduce((a, s) => a + s.passengers.filter(p => p.isBoarded).length, 0);
+        {loading ? (
+          <div className="text-center py-20 text-slate-600">
+            <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin opacity-30" />
+            <p>Loading your routes...</p>
+          </div>
+        ) : routes.length === 0 ? (
+          <div className="text-center py-20 text-slate-600 rounded-xl border border-dashed border-white/8">
+            <RouteIcon className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm text-slate-500">No route assigned for this day.</p>
+            <p className="text-xs text-slate-700 mt-1">Routes appear here once routing completes for the service week.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {routes.map(route => {
+              const routeId = route.route_id ?? 0;
+              const isOpen = expanded.includes(routeId);
+              const info = statusInfo(route.assignment?.status);
+              const orderedStops = route.stops.slice().sort((a, b) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0));
+              const firstStop = orderedStops[0];
+              const totalPax = route.stops.reduce((a, s) => a + (s.passengers?.length ?? 0), 0);
+              const boardedPax = route.stops.reduce((a, s) => a + (s.passengers?.filter(p => p.boarded).length ?? 0), 0);
+              const isPickup = route.route_type === 'pickup';
 
-            return (
-              <div key={route.id} className="rounded-xl border border-white/8 bg-card overflow-hidden">
-                {/* Header */}
-                <div
-                  className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-white/3 transition"
-                  onClick={() => toggleExpand(route.id)}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/15 flex items-center justify-center">
-                      <Navigation className="w-5 h-5 text-sky-400" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <p className="text-sm font-semibold text-white">{route.name}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusStyle[route.status]}`}>
-                          {statusLabel[route.status]}
-                        </span>
+              return (
+                <div key={routeId} className="rounded-xl border border-white/8 bg-card overflow-hidden">
+                  {/* Header */}
+                  <div
+                    className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-white/3 transition"
+                    onClick={() => toggleExpand(routeId)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/15 flex items-center justify-center">
+                        <Navigation className="w-5 h-5 text-sky-400" />
                       </div>
-                      <div className="flex items-center gap-4 text-xs text-slate-600">
-                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{route.timeSlot}</span>
-                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{route.stops.length} stops</span>
-                        <span className="flex items-center gap-1"><Users className="w-3 h-3" />{boardedPax}/{totalPax} boarded</span>
-                        <span className="flex items-center gap-1"><Car className="w-3 h-3" />{route.totalDistance}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {route.status === 'not-started' && (
-                      <button
-                        onClick={e => { e.stopPropagation(); changeStatus(route.id, 'in-progress'); }}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-xs font-semibold transition"
-                      >
-                        <Play className="w-3 h-3" />
-                        Start
-                      </button>
-                    )}
-                    {route.status === 'in-progress' && (
-                      <button
-                        onClick={e => { e.stopPropagation(); changeStatus(route.id, 'completed'); }}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold transition"
-                      >
-                        <Flag className="w-3 h-3" />
-                        Complete
-                      </button>
-                    )}
-                    {isOpen ? <ChevronUp className="w-4 h-4 text-slate-600" /> : <ChevronDown className="w-4 h-4 text-slate-600" />}
-                  </div>
-                </div>
-
-                {/* Expanded */}
-                {isOpen && (
-                  <div className="border-t border-white/6 p-5">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Map */}
                       <div>
-                        <p className="text-xs text-slate-600 mb-3 uppercase tracking-wider">Route Map</p>
-                        <InteractiveMap
-                          center={[route.stops[0].latitude, route.stops[0].longitude]}
-                          markers={route.stops.map(s => ({
-                            position: [s.latitude, s.longitude] as [number, number],
-                            label: `Stop ${s.order}: ${s.location}`,
-                            color: s.type === 'pickup' ? '#0EA5E9' : '#10B981',
-                          }))}
-                          showRoute
-                          height="380px"
-                        />
-                        <div className="grid grid-cols-3 gap-2 mt-3">
-                          <div className="rounded-lg border border-white/6 bg-white/3 p-3 text-center">
-                            <p className="text-xs text-slate-600">Distance</p>
-                            <p className="text-base font-bold text-white mt-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{route.totalDistance}</p>
-                          </div>
-                          <div className="rounded-lg border border-white/6 bg-white/3 p-3 text-center">
-                            <p className="text-xs text-slate-600">Duration</p>
-                            <p className="text-base font-bold text-white mt-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{route.totalDuration}</p>
-                          </div>
-                          <div className="rounded-lg border border-white/6 bg-white/3 p-3 text-center">
-                            <p className="text-xs text-slate-600">Stops</p>
-                            <p className="text-base font-bold text-white mt-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{route.stops.length}</p>
-                          </div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="text-sm font-semibold text-white capitalize">
+                            {isPickup ? 'Pickup Route' : 'Dropoff Route'}
+                            {route.zone_name ? ` · ${route.zone_name}` : ''}
+                          </p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${info.cls}`}>
+                            {info.label}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-slate-600">
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{route.shift_time}</span>
+                          <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{route.stops.length} stops</span>
+                          <span className="flex items-center gap-1"><Users className="w-3 h-3" />{boardedPax}/{totalPax} boarded</span>
+                          <span className="flex items-center gap-1">
+                            <Car className="w-3 h-3" />
+                            {route.total_distance_km != null ? `${route.total_distance_km} km` : '—'}
+                          </span>
                         </div>
                       </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {info.label === 'Not Started' && route.assignment?.assignment_id != null && (
+                        <button
+                          onClick={e => { e.stopPropagation(); void changeStatus(route, 'InProgress'); }}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-xs font-semibold transition"
+                        >
+                          <Play className="w-3 h-3" />
+                          Start
+                        </button>
+                      )}
+                      {info.label === 'In Progress' && route.assignment?.assignment_id != null && (
+                        <button
+                          onClick={e => { e.stopPropagation(); void changeStatus(route, 'Completed'); }}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold transition"
+                        >
+                          <Flag className="w-3 h-3" />
+                          Complete
+                        </button>
+                      )}
+                      {isOpen ? <ChevronUp className="w-4 h-4 text-slate-600" /> : <ChevronDown className="w-4 h-4 text-slate-600" />}
+                    </div>
+                  </div>
 
-                      {/* Stops */}
-                      <div>
-                        <p className="text-xs text-slate-600 mb-3 uppercase tracking-wider">Stops & Passengers</p>
-                        <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                          {route.stops.map((stop, idx) => (
-                            <div key={stop.id}>
-                              {stop.travelFromPrev && stop.travelFromPrev !== 'Start' && (
-                                <div className="flex items-center gap-2 pl-8 py-1 text-xs text-slate-700">
-                                  <div className="w-0.5 h-4 bg-white/6 ml-3.5" />
-                                  <span>{stop.travelFromPrev}</span>
-                                </div>
-                              )}
-                              <div className="rounded-xl border border-white/6 bg-white/3 p-4">
-                                <div className="flex items-start gap-3">
-                                  <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white ${
-                                    stop.type === 'pickup' ? 'bg-sky-500' : 'bg-emerald-500'
-                                  }`}>
-                                    {stop.order}
-                                  </div>
-                                  <div className="flex-1">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-sm font-medium text-white">{stop.location}</p>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs text-slate-600 font-mono">{stop.estimatedTime}</span>
-                                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${stop.type === 'pickup' ? 'bg-sky-500/15 text-sky-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
-                                          {stop.type}
-                                        </span>
-                                      </div>
+                  {/* Expanded */}
+                  {isOpen && (
+                    <div className="border-t border-white/6 p-5">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Map */}
+                        <div>
+                          <p className="text-xs text-slate-600 mb-3 uppercase tracking-wider">Route Map</p>
+                          <InteractiveMap
+                            center={firstStop ? [firstStop.latitude ?? OFFICE_LOCATION.latitude, firstStop.longitude ?? OFFICE_LOCATION.longitude] : [OFFICE_LOCATION.latitude, OFFICE_LOCATION.longitude]}
+                            markers={[
+                              ...orderedStops.map(s => ({
+                                position: [s.latitude ?? OFFICE_LOCATION.latitude, s.longitude ?? OFFICE_LOCATION.longitude] as [number, number],
+                                label: `Stop ${s.sequence_order}`,
+                                color: isPickup ? '#0EA5E9' : '#10B981',
+                              })),
+                            ]}
+                            showRoute
+                            height="380px"
+                            lazy
+                          />
+                          <div className="grid grid-cols-3 gap-2 mt-3">
+                            <div className="rounded-lg border border-white/6 bg-white/3 p-3 text-center">
+                              <p className="text-xs text-slate-600">Distance</p>
+                              <p className="text-base font-bold text-white mt-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                                {route.total_distance_km != null ? `${route.total_distance_km} km` : '—'}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-white/6 bg-white/3 p-3 text-center">
+                              <p className="text-xs text-slate-600">Duration</p>
+                              <p className="text-base font-bold text-white mt-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                                {route.total_travel_time_min != null ? `${route.total_travel_time_min} min` : '—'}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-white/6 bg-white/3 p-3 text-center">
+                              <p className="text-xs text-slate-600">Stops</p>
+                              <p className="text-base font-bold text-white mt-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{route.stops.length}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Stops */}
+                        <div>
+                          <p className="text-xs text-slate-600 mb-3 uppercase tracking-wider">Stops & Passengers</p>
+                          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                            {orderedStops.map((stop, idx) => (
+                              <div key={stop.stop_id ?? idx}>
+                                <div className="rounded-xl border border-white/6 bg-white/3 p-4">
+                                  <div className="flex items-start gap-3">
+                                    <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white ${
+                                      isPickup ? 'bg-sky-500' : 'bg-emerald-500'
+                                    }`}>
+                                      {stop.sequence_order}
                                     </div>
-
-                                    {stop.passengers.length > 0 && (
-                                      <div className="space-y-1.5 mt-2">
-                                        {stop.passengers.map(pax => (
-                                          <div key={pax.id} className="flex items-center justify-between bg-white/3 rounded-lg px-3 py-2 border border-white/5">
-                                            <div className="flex items-center gap-2">
-                                              <div className={`w-1.5 h-1.5 rounded-full ${pax.isBoarded ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                                              <span className="text-xs text-slate-300 font-medium">{pax.name}</span>
-                                              <span className="text-xs text-slate-600">{pax.phone}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                              <span className="text-xs text-slate-600">{pax.isBoarded ? 'Boarded' : 'Waiting'}</span>
-                                              <Switch
-                                                checked={pax.isBoarded}
-                                                onCheckedChange={() => togglePassenger(route.id, stop.id, pax.id)}
-                                              />
-                                            </div>
-                                          </div>
-                                        ))}
+                                    <div className="flex-1">
+                                      <div className="flex items-center justify-between mb-1 gap-3">
+                                        <div className="min-w-0">
+                                          <AddressText
+                                            lat={stop.latitude}
+                                            lng={stop.longitude}
+                                            className="text-sm font-medium text-white truncate"
+                                          />
+                                          {stop.latitude != null && stop.longitude != null && (
+                                            <p className="text-xs text-slate-600 font-mono mt-0.5">
+                                              {stop.latitude.toFixed(5)}, {stop.longitude.toFixed(5)}
+                                            </p>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                          {stop.arrival_time && (
+                                            <span className="text-xs text-slate-600 font-mono">{stop.arrival_time}</span>
+                                          )}
+                                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isPickup ? 'bg-sky-500/15 text-sky-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
+                                            {isPickup ? 'pickup' : 'dropoff'}
+                                          </span>
+                                        </div>
                                       </div>
-                                    )}
-                                    {stop.passengers.length === 0 && (
-                                      <p className="text-xs text-slate-700 mt-1 italic">Destination stop — no boardings</p>
-                                    )}
+
+                                      {stop.passengers.length > 0 && (
+                                        <div className="space-y-1.5 mt-2">
+                                          {stop.passengers.map((pax, pIdx) => (
+                                            <div key={pax.employee_id ?? pIdx} className="flex items-center justify-between bg-white/3 rounded-lg px-3 py-2 border border-white/5">
+                                              <div className="flex items-center gap-2">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${pax.boarded ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                                <span className="text-xs text-slate-300 font-medium">{pax.employee_name ?? `Employee #${pax.employee_id ?? '—'}`}</span>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-xs text-slate-600">{pax.boarded ? 'Boarded' : 'Waiting'}</span>
+                                                <Switch
+                                                  checked={!!pax.boarded}
+                                                  onCheckedChange={() => void boardPassenger(route, stop.stop_id ?? 0, pax)}
+                                                />
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {stop.passengers.length === 0 && (
+                                        <p className="text-xs text-slate-700 mt-1 italic">Destination stop — no boardings</p>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </Sidebar>
   );

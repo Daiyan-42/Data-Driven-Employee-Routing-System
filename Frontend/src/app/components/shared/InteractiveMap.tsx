@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -20,32 +20,50 @@ interface MapPickerProps {
   }>;
   showRoute?: boolean;
   height?: string;
+  /**
+   * Mount the map only once it scrolls into view. Use on pages that render
+   * many route cards, so a whole list of Leaflet maps isn't downloading OSM
+   * tiles at once. Off-screen cards show a lightweight placeholder instead.
+   */
+  lazy?: boolean;
 }
 
 const createColoredIcon = (color: string, number?: number) => {
   return L.divIcon({
     className: 'custom-marker',
     html: `
-      <div style="
-        background-color: ${color};
-        width: 30px;
-        height: 30px;
-        border-radius: 50% 50% 50% 0;
-        transform: rotate(-45deg);
-        border: 3px solid rgba(255,255,255,0.9);
-        box-shadow: 0 3px 12px rgba(0,0,0,0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      ">
-        <span style="
-          transform: rotate(45deg);
-          color: white;
-          font-weight: 700;
-          font-size: 13px;
-          font-family: Rajdhani, sans-serif;
-          line-height: 1;
-        ">${number ?? ''}</span>
+      <div style="position: relative; width: 30px; height: 30px;">
+        <div style="
+          position: absolute;
+          inset: 0;
+          background-color: ${color};
+          border-radius: 50% 50% 50% 0;
+          transform: rotate(-45deg);
+          animation: map-pulse 1.8s ease-out infinite;
+          pointer-events: none;
+        "></div>
+        <div style="
+          position: absolute;
+          inset: 0;
+          background-color: ${color};
+          border-radius: 50% 50% 50% 0;
+          transform: rotate(-45deg);
+          border: 3px solid rgba(255,255,255,0.9);
+          box-shadow: 0 3px 12px rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+        ">
+          <span style="
+            transform: rotate(45deg);
+            color: white;
+            font-weight: 700;
+            font-size: 13px;
+            font-family: Rajdhani, sans-serif;
+            line-height: 1;
+          ">${number ?? ''}</span>
+        </div>
       </div>
     `,
     iconSize: [30, 30],
@@ -61,14 +79,37 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
   markers = [],
   showRoute = false,
   height = '420px',
+  lazy = false,
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
   const selectedMarkerRef = useRef<L.Marker | null>(null);
+  // Eager maps mount immediately; lazy maps wait until they scroll into view.
+  const [visible, setVisible] = useState(!lazy);
 
   useEffect(() => {
+    if (!lazy || visible) return;
+    const el = wrapperRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      // Preload slightly before the card scrolls fully into view.
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [lazy, visible]);
+
+  useEffect(() => {
+    if (!visible) return;
     if (!mapRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapRef.current, {
@@ -109,7 +150,7 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
         mapInstanceRef.current = null;
       }
     };
-  }, []);
+  }, [visible]);
 
   useEffect(() => {
     if (mapInstanceRef.current) {
@@ -153,7 +194,7 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
 
   return (
     <div
-      ref={mapRef}
+      ref={wrapperRef}
       style={{
         height,
         width: '100%',
@@ -161,7 +202,33 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
         overflow: 'hidden',
         border: '1px solid rgba(255,255,255,0.08)',
         zIndex: 0,
+        position: 'relative',
       }}
-    />
+    >
+      {lazy && !visible ? (
+        <div
+          style={{
+            height: '100%',
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            background: 'rgba(255,255,255,0.02)',
+          }}
+        >
+          <span style={{ fontSize: 20, opacity: 0.4 }}>🗺️</span>
+          <span style={{ fontSize: 11, color: '#64748b', letterSpacing: '0.02em' }}>
+            Map loads when visible
+          </span>
+        </div>
+      ) : (
+        <div
+          ref={mapRef}
+          style={{ height: '100%', width: '100%' }}
+        />
+      )}
+    </div>
   );
 };

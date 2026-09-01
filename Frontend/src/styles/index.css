@@ -1,3 +1,26 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+/* Radar-style ping emitted by map markers so pinned locations stand out. */
+@keyframes map-pulse {
+  0% {
+    opacity: 0.5;
+    transform: rotate(-45deg) scale(1);
+  }
+  70% {
+    opacity: 0;
+    transform: rotate(-45deg) scale(1.7);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(-45deg) scale(1.7);
+  }
+}
+
+/* Dropdown lists: without this, <option> text inherits the light theme and
+   becomes invisible on the native light dropdown background. */
+select option {
+  background-color: #131929;
+  color: #e8edf5;
+}

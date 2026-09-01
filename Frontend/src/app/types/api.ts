@@ -60,6 +60,27 @@ export interface EmployeeProfileUpdate {
   home_lng?: number;
 }
 
+/** Admin creates an employee account (temp password handed over offline). */
+export interface EmployeeCreate {
+  name: string;
+  email: string;
+  phone?: string;
+  password: string;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+export interface ResetPasswordRequest {
+  new_password: string;
+}
+
+export interface MessageResponse {
+  message: string;
+}
+
 export interface EmployeesListResponse {
   employees: Employee[];
   pagination: Pagination;
@@ -210,6 +231,74 @@ export interface DropoffRequestsListResponse {
 export interface PickupRequestsListResponse {
   pickup_requests: PickupRequest[];
   pagination: Pagination;
+}
+
+// ── Weekly requests (Fri/Sat window → next week Sun–Sat) ───────
+
+export interface WeeklyDayRequestPayload {
+  shift_start_time: string; // "HH:MM"
+  shift_end_time: string;   // "HH:MM"
+  pickup_lat: number;
+  pickup_lng: number;
+  drop_lat: number;
+  drop_lng: number;
+}
+
+export type WeeklyDayKey =
+  | "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
+
+export interface WeeklyRequestPayload {
+  sun?: WeeklyDayRequestPayload | null;
+  mon?: WeeklyDayRequestPayload | null;
+  tue?: WeeklyDayRequestPayload | null;
+  wed?: WeeklyDayRequestPayload | null;
+  thu?: WeeklyDayRequestPayload | null;
+  fri?: WeeklyDayRequestPayload | null;
+  sat?: WeeklyDayRequestPayload | null;
+}
+
+export interface WeeklyWindowView {
+  open: boolean;
+  opens: string;
+  closes: string;
+  next_open: string;
+  closed_reason?: string | null;
+}
+
+export interface WeeklyDayView {
+  date: string;
+  pickup?: PickupRequest | null;
+  dropoff?: DropoffRequest | null;
+}
+
+export interface WeeklyRequestView {
+  open: boolean;
+  window: WeeklyWindowView;
+  service_start: string;
+  service_end: string;
+  week: Record<WeeklyDayKey, WeeklyDayView | null>;
+}
+
+// ── Ad-hoc requests (same-day, before 7 PM) ───────────────────
+
+export interface AdhocRequestPayload {
+  shift_start_time: string; // "HH:MM"
+  shift_end_time: string;   // "HH:MM"
+  pickup_lat: number;
+  pickup_lng: number;
+  drop_lat: number;
+  drop_lng: number;
+}
+
+export interface AdhocRequestView {
+  open: boolean;
+  service_date: string;
+  cutoff: string;
+  reason?: string | null;
+  existing: {
+    pickup?: PickupRequest | null;
+    dropoff?: DropoffRequest | null;
+  };
 }
 
 export interface ScheduleResponse {

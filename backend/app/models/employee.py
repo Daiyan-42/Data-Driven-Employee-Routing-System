@@ -29,6 +29,34 @@ class EmployeeProfileUpdate(BaseModel):
     home_lng: Optional[float] = None
 
 
+class EmployeeCreate(BaseModel):
+    """Admin-created employee account. The admin picks the initial (temporary)
+    password and hands the credentials to the employee offline."""
+
+    name: str
+    email: str
+    phone: Optional[str] = None
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """Employee changes their own password — must know the current one."""
+
+    current_password: str
+    new_password: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """Admin overwrites an employee's password with a new temporary value.
+    The existing password is never read or returned."""
+
+    new_password: str
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class StopInfo(BaseModel):
     stop_id: int
     sequence_order: Optional[int] = None

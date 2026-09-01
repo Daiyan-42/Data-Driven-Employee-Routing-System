@@ -1,7 +1,7 @@
 import React, { ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import {
-  MapPinned, MapPin, ClipboardList, User, LogOut, Map,
+  MapPinned, ClipboardList, User, LogOut, Map,
   Car, Menu, X, Zap, Bus,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -20,8 +20,7 @@ interface NavItem {
 }
 
 const employeeNavItems: NavItem[] = [
-  { icon: MapPinned, label: 'Pickup Request', path: '/employee/pickup', color: 'text-sky-400' },
-  { icon: MapPin, label: 'Dropoff Request', path: '/employee/dropoff', color: 'text-emerald-400' },
+  { icon: MapPinned, label: 'Pickup & Dropoff Request', path: '/employee/request', color: 'text-sky-400' },
   { icon: Zap, label: 'Ad-hoc Request', path: '/employee/adhoc', color: 'text-amber-400' },
   { icon: ClipboardList, label: 'My Requests', path: '/employee/requests', color: 'text-purple-400' },
   { icon: User, label: 'My Profile', path: '/employee/profile', color: 'text-slate-400' },

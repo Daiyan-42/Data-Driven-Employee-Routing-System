@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import date
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.dependencies import get_current_user, TokenData
 from app.services.driver_service import DriverService
@@ -34,17 +34,28 @@ def update_my_profile(payload: Dict[str, Any], token: TokenData = Depends(get_cu
 
 
 @router.get("/assignments/today", response_model=Any)
-def my_assignment_today(token: TokenData = Depends(get_current_user), svc: RouteService = Depends(_route_svc)):
-    """Return today's assignment (route + ordered stops + passengers) or an empty list."""
-    today = date.today().isoformat()
-    summary = svc.get_schedule_summary(service_date=today)
+def my_assignment_today(
+    service_date: Optional[str] = None,
+    token: TokenData = Depends(get_current_user),
+    svc: RouteService = Depends(_route_svc),
+):
+    """Return the driver's assignment (route + ordered stops + passengers).
+
+    Defaults to today; pass ``service_date`` to view another day's route
+    (useful after routing completes for the service week).
+    """
+    target = service_date or date.today().isoformat()
+    summary = svc.get_schedule_summary(service_date=target)
 
     driver = _svc().get_by_user_id(token.user_id)
     if not driver:
         return {"routes": []}
 
     driver_id = driver.get("driver_id")
-    filtered_routes = [route for route in summary.routes if (route.assignment or {}).get("driver_id") == driver_id]
+    filtered_routes = [
+        route for route in summary.routes
+        if route.assignment is not None and route.assignment.driver_id == driver_id
+    ]
     return {"routes": filtered_routes}
 
 

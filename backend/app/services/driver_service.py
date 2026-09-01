@@ -255,10 +255,10 @@ class DriverService:
 
         # find stop_passenger record and mark boarded
         sp = (
-            self.db.table("stop_passenger").select("stop_passenger_id, boarded").eq("stop_id", stop_id).eq("employee_id", employee_id).limit(1).execute()
+            self.db.table("stop_passenger").select("id, boarded_status").eq("stop_id", stop_id).eq("employee_id", employee_id).limit(1).execute()
         )
         if not sp.data:
             raise HTTPException(status_code=404, detail="Passenger not assigned to this stop")
 
-        self.db.table("stop_passenger").update({"boarded": True}).eq("stop_passenger_id", sp.data[0]["stop_passenger_id"]).execute()
+        self.db.table("stop_passenger").update({"boarded_status": True}).eq("id", sp.data[0]["id"]).execute()
         return {"message": "passenger boarded", "employee_id": employee_id, "stop_id": stop_id}

@@ -2,6 +2,12 @@ from fastapi import APIRouter, Depends, Query
 from app.database import supabase
 from app.dependencies import require_admin, TokenData
 from app.models.common import paginate
+from app.models.employee import (
+    EmployeeCreate,
+    EmployeeProfileResponse,
+    MessageResponse,
+    ResetPasswordRequest,
+)
 from app.models.route import (
     DropoffRoutingRunPayload,
     PickupRoutingInputResponse,
@@ -16,11 +22,17 @@ from app.models.route import (
     ZoneUpdate,
     ZonesListResponse,
 )
+from app.scheduler import run_pending_routing
+from app.services.employee_service import EmployeeService
 from app.services.route_service import RouteService
 from app.services.routing_service import RoutingService
 from app.services.zone_service import ZoneService
 
 router = APIRouter()
+
+
+def _emp_svc() -> EmployeeService:
+    return EmployeeService(supabase)
 
 
 def _routing_svc() -> RoutingService:
@@ -61,6 +73,51 @@ def run_dropoff_routing(
     svc: RoutingService = Depends(_routing_svc),
 ):
     return svc.run_dropoff_routing(payload)
+
+
+@router.post("/admin/routing/auto-run")
+def auto_run_routing(
+    _: TokenData = Depends(require_admin),
+):
+    """Force-run the auto-routing pass for the current request cycle.
+
+    Normally this runs on its own after Saturday 11:59 PM; this endpoint is for
+    testing/troubleshooting. Safe to call repeatedly (idempotent).
+    """
+    return run_pending_routing(force=True)
+
+
+@router.post("/admin/employees", response_model=EmployeeProfileResponse, status_code=201)
+def create_employee(
+    payload: EmployeeCreate,
+    _: TokenData = Depends(require_admin),
+    svc: EmployeeService = Depends(_emp_svc),
+):
+    """Admin creates an employee account. The temporary password is handed to
+    the employee offline — there is no public signup."""
+    return svc.create_employee(payload)
+
+
+@router.post("/admin/employees/{user_id}/reset-password", response_model=MessageResponse)
+def reset_employee_password(
+    user_id: int,
+    payload: ResetPasswordRequest,
+    _: TokenData = Depends(require_admin),
+    svc: EmployeeService = Depends(_emp_svc),
+):
+    """Admin overwrites an employee's password with a new temporary value.
+    The existing password is never read or returned."""
+    return svc.reset_password(user_id, payload.new_password)
+
+
+@router.delete("/admin/employees/{user_id}", response_model=MessageResponse)
+def deactivate_employee(
+    user_id: int,
+    _: TokenData = Depends(require_admin),
+    svc: EmployeeService = Depends(_emp_svc),
+):
+    """Soft-delete: the employee keeps their history but can no longer log in."""
+    return svc.deactivate(user_id)
 
 
 @router.get("/admin/schedule-summary", response_model=ScheduleSummaryResponse)
