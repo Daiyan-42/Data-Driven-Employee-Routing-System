@@ -367,6 +367,19 @@ export interface RoutingRunResponse {
   message?: string | null;
 }
 
+export interface RunAllRoutingDate {
+  service_date: string;
+  routes_created: number;
+  employees_assigned: number;
+  unassigned: number;
+}
+
+export interface RunAllRoutingResponse {
+  ran: boolean;
+  reason?: string;
+  dates: RunAllRoutingDate[];
+}
+
 export interface RouteAssignmentResponse {
   assignment_id: number;
   route_id: number;
