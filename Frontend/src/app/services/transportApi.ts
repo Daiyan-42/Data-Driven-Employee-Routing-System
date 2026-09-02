@@ -26,6 +26,7 @@ import type {
   RouteAssignmentResponse,
   RouteDetailResponse,
   RoutingRunResponse,
+  RunAllRoutingResponse,
   ScheduleResponse,
   ScheduleSummaryResponse,
   Vehicle,
@@ -486,6 +487,13 @@ export const adminApi = {
     return request<RoutingRunResponse>("/admin/dropoff-routing/run", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  /** Route every pending request (any date, any shift) in one call. */
+  runAllRouting(): Promise<RunAllRoutingResponse> {
+    return request<RunAllRoutingResponse>("/admin/routing/run-all", {
+      method: "POST",
     });
   },
 

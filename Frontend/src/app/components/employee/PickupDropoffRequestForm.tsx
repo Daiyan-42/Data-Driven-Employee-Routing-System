@@ -133,12 +133,21 @@ const isoForDay = (view: WeeklyRequestView, key: WeeklyDayKey): string => {
 const labelFor = (view: WeeklyRequestView, key: WeeklyDayKey): DayLabel =>
   labelFromISO(isoForDay(view, key));
 
+/** True if `t` ("HH:MM") is one of the selectable overnight shift times. */
+const isNightShift = (t?: string | null): boolean =>
+  !!t && SHIFT_OPTIONS.includes(t.slice(0, 5));
+
 /** Build the day booking for a day, prefilled from an existing saved request. */
 const dayFromView = (day: WeeklyDayView | null, home: MapLocation | null): DayBooking => {
   if (day?.pickup && day?.dropoff) {
+    const savedStart = (day.pickup.shift_start_time ?? '').slice(0, 5);
+    const savedEnd = (day.dropoff.shift_end_time ?? '').slice(0, 5);
+    // Requests saved before the overnight-only change can carry day-shift times
+    // (e.g. 07:00/19:00) that are no longer selectable; fall back to the default
+    // overnight pair so the stale value never resubmits and gets rejected.
     return {
-      shiftStart: (day.pickup.shift_start_time ?? '22:00').slice(0, 5),
-      shiftEnd: (day.dropoff.shift_end_time ?? '06:00').slice(0, 5),
+      shiftStart: isNightShift(savedStart) ? savedStart : '22:00',
+      shiftEnd: isNightShift(savedEnd) ? savedEnd : '06:00',
       pickup: locFromCoords(day.pickup.pickup_lat, day.pickup.pickup_lng),
       dropoff: locFromCoords(day.dropoff.drop_lat, day.dropoff.drop_lng),
     };
@@ -295,6 +304,7 @@ export const PickupDropoffRequestForm: React.FC = () => {
   };
 
   const validateDay = (b: DayBooking): string | null => {
+    if (!isNightShift(b.shiftStart) || !isNightShift(b.shiftEnd)) return 'Pick a shift time between 10 PM and 6 AM.';
     if (b.shiftEnd === b.shiftStart) return 'Shift start and end must be different (overnight shifts run into the next day).';
     if (!b.pickup.pinned) return 'Set the pickup location.';
     if (!b.dropoff.pinned) return 'Set the dropoff location.';

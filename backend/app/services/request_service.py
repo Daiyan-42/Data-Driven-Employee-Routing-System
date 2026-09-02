@@ -345,23 +345,28 @@ class RequestService:
             )
 
         service_days = target_service_week(now.date())
-        days = {}
+        requested = {}
         for key, service_date in zip(WEEK_DAY_KEYS, service_days):
             day = getattr(data, key, None)
             if day is not None:
                 self._validate_weekly_day(day)
-                days[key] = (service_date, day)
-        if not days:
+                requested[service_date] = day
+        if not requested:
             raise HTTPException(status_code=422, detail="At least one day must be provided")
 
-        for key, (service_date, day) in days.items():
-            self._upsert_weekly_day(employee_id, service_date, day)
-
-        # Days the employee removed this week: drop their rows so the updated
-        # request is the only one the algorithm sees.
-        for key, service_date in zip(WEEK_DAY_KEYS, service_days):
-            if key not in days:
-                self._delete_weekly_rows(employee_id, service_date)
+        # The submitted form is the full truth for the whole service week: every
+        # day listed is written as exactly one fresh Pending pair, and every day
+        # left out is cleared. Routing between edits may already have flipped
+        # earlier rows to Approved and attached them to routes, so the rewrite
+        # detaches the employee from each day's routes and replaces/removes the
+        # day's weekly rows whatever their status — otherwise stale Approved
+        # ghosts accumulate and My Requests starts listing days the employee no
+        # longer requests.
+        for service_date in service_days:
+            if service_date in requested:
+                self._replace_weekly_day(employee_id, service_date, requested[service_date])
+            else:
+                self._clear_weekly_day(employee_id, service_date)
 
         return self.get_current_weekly_request(user_id)
 
@@ -389,9 +394,60 @@ class RequestService:
                 detail="Shift time must be one of: 22:00, 23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00",
             )
 
-    def _upsert_weekly_day(self, employee_id: int, service_date, day):
-        existing_pickup = self._get_weekly_row_id("pickup_request", employee_id, service_date)
-        pickup_payload = {
+    def _replace_weekly_day(self, employee_id: int, service_date, day):
+        """Rewrite one service day's weekly request as a single fresh Pending pair.
+
+        The day may already hold rows routed by an earlier run (Approved) or be
+        a leftover from an older submission. Whatever their status, those rows
+        are removed and the employee is detached from the day's routes (clearing
+        their driver manifest) before the new Pending pair is written. After this
+        call exactly one weekly pickup + dropoff row exists for (employee, date).
+        The day's ad-hoc request, if any, is untouched.
+        """
+        self._detach_employee_routes(employee_id, service_date)
+        self._delete_day_weekly_rows(employee_id, service_date)
+        self._insert_weekly_pair(employee_id, service_date, day)
+
+    def _clear_weekly_day(self, employee_id: int, service_date):
+        """Remove a service day's weekly request entirely (rows of any status)
+        and detach the employee from the day's routes. Used for days the employee
+        left out of the submitted week."""
+        self._detach_employee_routes(employee_id, service_date)
+        self._delete_day_weekly_rows(employee_id, service_date)
+
+    def _delete_day_weekly_rows(self, employee_id: int, service_date):
+        """Delete every weekly (non-ad-hoc) pickup and dropoff row for one day.
+
+        Pickups are typed, so only ``request_type == 'Regular'`` rows go.
+        Dropoffs carry no request_type; a day's ad-hoc dropoff (created at/after
+        the day's ad-hoc pickup) is preserved by removing only dropoffs older
+        than the earliest ad-hoc pickup, mirroring ``_delete_prior_adhoc``.
+        """
+        iso = self._date_to_str(service_date)
+        self.db.table("pickup_request").delete() \
+            .eq("employee_id", employee_id) \
+            .eq("service_date", iso) \
+            .eq("request_type", "Regular").execute()
+        adhoc = (
+            self.db.table("pickup_request")
+            .select("created_at")
+            .eq("employee_id", employee_id)
+            .eq("service_date", iso)
+            .eq("request_type", "Ad-hoc")
+            .execute()
+        ).data or []
+        query = (
+            self.db.table("dropoff_request")
+            .delete()
+            .eq("employee_id", employee_id)
+            .eq("service_date", iso)
+        )
+        if adhoc:
+            query = query.lt("created_at", min(r["created_at"] for r in adhoc))
+        query.execute()
+
+    def _insert_weekly_pair(self, employee_id: int, service_date, day):
+        self.db.table("pickup_request").insert({
             "employee_id": employee_id,
             "pickup_lat": day.pickup_lat,
             "pickup_lng": day.pickup_lng,
@@ -399,25 +455,15 @@ class RequestService:
             "service_date": self._date_to_str(service_date),
             "request_type": "Regular",
             "status": "Pending",
-        }
-        if existing_pickup:
-            self.db.table("pickup_request").update(pickup_payload).eq("pickup_id", existing_pickup).execute()
-        else:
-            self.db.table("pickup_request").insert(pickup_payload).execute()
-
-        existing_dropoff = self._get_weekly_row_id("dropoff_request", employee_id, service_date)
-        dropoff_payload = {
+        }).execute()
+        self.db.table("dropoff_request").insert({
             "employee_id": employee_id,
             "drop_lat": day.drop_lat,
             "drop_lng": day.drop_lng,
             "shift_end_time": self._time_to_str(day.shift_end_time),
             "service_date": self._date_to_str(service_date),
             "status": "Pending",
-        }
-        if existing_dropoff:
-            self.db.table("dropoff_request").update(dropoff_payload).eq("dropoff_id", existing_dropoff).execute()
-        else:
-            self.db.table("dropoff_request").insert(dropoff_payload).execute()
+        }).execute()
 
     def _get_weekly_row(self, table: str, employee_id: int, service_date):
         """Most recent weekly row (pickup or dropoff) for a target date.
@@ -444,35 +490,6 @@ class RequestService:
         if not res.data:
             return None
         return self._flatten_pickup(res.data[0]) if table == "pickup_request" else self._flatten_dropoff(res.data[0])
-
-    def _get_weekly_row_id(self, table: str, employee_id: int, service_date):
-        id_col = "pickup_id" if table == "pickup_request" else "dropoff_id"
-        query = (
-            self.db.table(table)
-            .select(id_col)
-            .eq("employee_id", employee_id)
-            .eq("service_date", self._date_to_str(service_date))
-            .eq("status", "Pending")
-        )
-        if table == "pickup_request":
-            query = query.eq("request_type", "Regular")
-        res = query.order("created_at", desc=True).limit(1).execute()
-        if not res.data:
-            return None
-        return res.data[0][id_col]
-
-    def _delete_weekly_rows(self, employee_id: int, service_date):
-        for table in ("pickup_request", "dropoff_request"):
-            query = (
-                self.db.table(table)
-                .delete()
-                .eq("employee_id", employee_id)
-                .eq("service_date", self._date_to_str(service_date))
-                .eq("status", "Pending")
-            )
-            if table == "pickup_request":
-                query = query.eq("request_type", "Regular")
-            query.execute()
 
     # ── Ad-hoc Requests ─────────────────────────────────────────
     #
