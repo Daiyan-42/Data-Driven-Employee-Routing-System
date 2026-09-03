@@ -46,9 +46,12 @@ class EmployeeService:
     def _null_schedule(self, service_date: str) -> dict:
         return {
             "service_date": service_date,
+            "pickup": None,
+            "dropoff": None,
             "route_id": None,
             "route_type": None,
             "shift_time": None,
+            "route_geometry": None,
             "stop": None,
             "driver": None,
             "vehicle": None,
@@ -208,7 +211,10 @@ class EmployeeService:
         rs_res = (
             self.db.table("route_stop")
             .select(
-                "stop_id, route_id, latitude, longitude, sequence_order, arrival_time"
+                "stop_id, route_id, latitude, longitude, sequence_order, arrival_time, "
+                # the solver names every stop; without these the employee sees a
+                # bare lat/lng where "Mazar Road Bus Stop" belongs
+                "departure_time, stop_name, is_adhoc, is_shared"
             )
             .in_("stop_id", stop_ids)
             .execute()
@@ -218,10 +224,15 @@ class EmployeeService:
 
         route_ids = list({r["route_id"] for r in rs_res.data})
 
-        # 3. Find route matching service_date
+        # 3. Routes on this date. There are normally TWO — the pickup that brings
+        #    the employee in and the dropoff that takes them home — because
+        #    migration 003 puts both on the same service_date (Case C reuses the
+        #    pickup's vehicle, so the two halves have to share a night). Taking
+        #    route_res.data[0] here would show one leg and silently hide the other.
         route_res = (
             self.db.table("route")
-            .select("route_id, route_type, service_date, shift_time")
+            .select("route_id, route_type, service_date, shift_time, "
+                    "total_distance_km, total_travel_time_min, route_geometry")
             .in_("route_id", route_ids)
             .eq("service_date", service_date)
             .execute()
@@ -229,69 +240,107 @@ class EmployeeService:
         if not route_res.data:
             return self._null_schedule(service_date)
 
-        target_route = route_res.data[0]
-        route_id = target_route["route_id"]
+        routes_by_id = {r["route_id"]: r for r in route_res.data}
 
-        # 4. Find the specific stop for this route
-        matched_stop = next((r for r in rs_res.data if r["route_id"] == route_id), None)
-        if not matched_stop:
-            return self._null_schedule(service_date)
-
-        # 5. Get route_assignment for this route
-        ra_res = (
+        # 4. Assignments, drivers and vehicles for every leg at once — one call
+        #    each rather than two per leg.
+        ra_rows = (
             self.db.table("route_assignment")
-            .select("assignment_id, driver_id, vehicle_id")
-            .eq("route_id", route_id)
+            .select("assignment_id, route_id, driver_id, vehicle_id")
+            .in_("route_id", list(routes_by_id))
             .execute()
-        )
+            .data
+        ) or []
+        assignment_by_route: dict = {}
+        for ra in ra_rows:
+            assignment_by_route.setdefault(ra["route_id"], ra)
 
-        driver = None
-        vehicle = None
-        if ra_res.data:
-            ra = ra_res.data[0]
+        driver_ids = {ra["driver_id"] for ra in ra_rows if ra.get("driver_id")}
+        vehicle_ids = {ra["vehicle_id"] for ra in ra_rows if ra.get("vehicle_id")}
 
-            d_res = (
+        drivers_by_id: dict = {}
+        if driver_ids:
+            d_rows = (
                 self.db.table("driver")
                 .select("driver_id, users(name, phone)")
-                .eq("driver_id", ra["driver_id"])
+                .in_("driver_id", list(driver_ids))
                 .execute()
-            )
-            if d_res.data:
-                d = d_res.data[0]
+                .data
+            ) or []
+            for d in d_rows:
                 u = d.get("users") or {}
-                driver = {
+                drivers_by_id[d["driver_id"]] = {
                     "driver_id": d["driver_id"],
                     "name": u.get("name"),
                     "phone": u.get("phone"),
                 }
 
-            v_res = (
+        vehicles_by_id: dict = {}
+        if vehicle_ids:
+            v_rows = (
                 self.db.table("vehicle")
                 .select("vehicle_id, plate_no, capacity")
-                .eq("vehicle_id", ra["vehicle_id"])
+                .in_("vehicle_id", list(vehicle_ids))
                 .execute()
-            )
-            if v_res.data:
-                v = v_res.data[0]
-                vehicle = {
+                .data
+            ) or []
+            for v in v_rows:
+                vehicles_by_id[v["vehicle_id"]] = {
                     "vehicle_id": v["vehicle_id"],
                     "plate_no": v.get("plate_no"),
                     "capacity": v.get("capacity"),
                 }
 
+        # 5. One leg per route, keyed by type. route.route_type is CHECK-constrained
+        #    to 'pickup'/'dropoff', but normalise anyway so a stray case can't drop
+        #    a leg on the floor.
+        legs: dict = {}
+        for route_id, route in routes_by_id.items():
+            matched_stop = next((r for r in rs_res.data if r["route_id"] == route_id), None)
+            if not matched_stop:
+                continue
+            key = (route.get("route_type") or "").strip().lower()
+            if key not in ("pickup", "dropoff") or key in legs:
+                continue
+            ra = assignment_by_route.get(route_id) or {}
+            legs[key] = {
+                "route_id": route_id,
+                "route_type": key,
+                "shift_time": route.get("shift_time"),
+                "route_geometry": route.get("route_geometry"),
+                "stop": {
+                    "stop_id": matched_stop["stop_id"],
+                    "sequence_order": matched_stop.get("sequence_order"),
+                    "latitude": matched_stop.get("latitude"),
+                    "longitude": matched_stop.get("longitude"),
+                    "arrival_time": matched_stop.get("arrival_time"),
+                    "departure_time": matched_stop.get("departure_time"),
+                    "stop_name": matched_stop.get("stop_name"),
+                    "is_adhoc": matched_stop.get("is_adhoc"),
+                    "is_shared": matched_stop.get("is_shared"),
+                },
+                "driver": drivers_by_id.get(ra.get("driver_id")),
+                "vehicle": vehicles_by_id.get(ra.get("vehicle_id")),
+            }
+
+        if not legs:
+            return self._null_schedule(service_date)
+
+        # The flat fields mirror the pickup leg (the dropoff, on a dropoff-only
+        # day) so consumers written against the earlier single-leg shape keep
+        # working unchanged.
+        primary = legs.get("pickup") or legs["dropoff"]
+
         return {
             "service_date": service_date,
-            "route_id": route_id,
-            "route_type": target_route.get("route_type"),
-            "shift_time": target_route.get("shift_time"),
-            "stop": {
-                "stop_id": matched_stop["stop_id"],
-                "sequence_order": matched_stop.get("sequence_order"),
-                "latitude": matched_stop.get("latitude"),
-                "longitude": matched_stop.get("longitude"),
-                "arrival_time": matched_stop.get("arrival_time"),
-            },
-            "driver": driver,
-            "vehicle": vehicle,
+            "pickup": legs.get("pickup"),
+            "dropoff": legs.get("dropoff"),
+            "route_id": primary["route_id"],
+            "route_type": primary["route_type"],
+            "shift_time": primary["shift_time"],
+            "route_geometry": primary["route_geometry"],
+            "stop": primary["stop"],
+            "driver": primary["driver"],
+            "vehicle": primary["vehicle"],
             "routing_done": True,
         }

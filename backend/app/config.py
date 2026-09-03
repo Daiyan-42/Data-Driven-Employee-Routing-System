@@ -24,6 +24,29 @@ class Settings(BaseSettings):
     # weekly flow can be exercised on any day of the week.
     request_window_override: bool = False
 
+    # --- Routing engine -----------------------------------------------------
+    # Which distance/duration provider the solver uses. "osrm" needs a local
+    # OSRM server (car profile); "haversine"/"lightweight" is the dependency-free
+    # straight-line fallback used where no OSRM server exists (e.g. Render).
+    # Either way the solver falls back to haversine if OSRM is unreachable, so a
+    # solve always completes.
+    routing_engine: str = "osrm"
+    osrm_base_url: str = "http://localhost:5000"
+    osrm_timeout_seconds: float = 30.0
+    # Health probe before the first real call; short, so a dead OSRM costs little.
+    osrm_probe_timeout_seconds: float = 2.0
+    # Haversine fallback only: straight-line km -> minutes.
+    routing_average_speed_kmph: float = 40.0
+
+    @property
+    def prefers_osrm(self) -> bool:
+        """True unless the deploy explicitly asked for the lightweight engine.
+
+        render.yaml ships ROUTING_ENGINE=lightweight; treat that (and the
+        explicit "haversine") as "don't even probe OSRM".
+        """
+        return self.routing_engine.strip().lower() not in {"haversine", "lightweight"}
+
     model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", extra="ignore")
 
 settings = Settings()

@@ -49,27 +49,59 @@ class PickupRoutingInputResponse(BaseModel):
 class PickupRoutingRunPayload(BaseModel):
     service_date: str
     shift_start_time: Optional[str] = None
-    office_lat: float
-    office_lng: float
+    # Optional overrides. They default to week_service.OFFICE_LOCATION, which is
+    # the single source of truth for where the office is.
+    office_lat: Optional[float] = None
+    office_lng: Optional[float] = None
     office_buffer_minutes: Optional[int] = 10
     stop_dwell_minutes: Optional[int] = 5
+    # Applies only to the haversine fallback; ignored when OSRM answers, because
+    # OSRM's durations come from the road network.
     average_speed_kmph: Optional[float] = 40.0
 
 
 class DropoffRoutingRunPayload(BaseModel):
     service_date: str
     shift_end_time: Optional[str] = None
-    office_lat: float
-    office_lng: float
+    office_lat: Optional[float] = None
+    office_lng: Optional[float] = None
     office_buffer_minutes: Optional[int] = 10
     stop_dwell_minutes: Optional[int] = 5
     average_speed_kmph: Optional[float] = 40.0
 
 
+class UnassignedEntry(BaseModel):
+    """One request the solver could not place, and why.
+
+    The reason is the actionable half. `no_coordinates` is a data-quality problem
+    for whoever maintains the roster; `no_vehicle_available` means the fleet is
+    too small for that shift; `dropped_for_120min_cap` and
+    `vehicle_not_free_in_time` are schedule pressure. Collapsing all four into a
+    bare count of ids — as the old response did — threw that away.
+    """
+
+    employee_id: Optional[int] = None
+    employee_name: Optional[str] = None
+    employee_email: Optional[str] = None
+    request_type: str
+    shift_time: Optional[str] = None
+    reason: str
+    vehicle_id: Optional[int] = None
+    plate_no: Optional[str] = None
+
+
 class RoutingRunResponse(BaseModel):
     routes_created: int
     employees_assigned: int
-    unassigned_pickup_ids: List[int]
+    # Kept so existing callers and the frontend keep working unchanged.
+    unassigned_pickup_ids: List[int] = []
+    unassigned: List[UnassignedEntry] = []
+    # "osrm" or "haversine" — which distance engine actually ran. Worth
+    # surfacing: a silent fallback is why distances would look approximate.
+    engine: Optional[str] = None
+    # Data-quality problems that are NOT unassigned requests, e.g. a vehicle with
+    # no parking coordinates, or requests with a NULL zone.
+    warnings: List[str] = []
     message: Optional[str] = None
 
 
@@ -81,6 +113,11 @@ class RouteStopResponse(BaseModel):
     sequence_order: int
     arrival_time: Optional[str]
     departure_time: Optional[str]
+    # "Mazar Road Bus Stop", "Agargaon Metro Station (shared drop point)",
+    # "Home (Rafiq Ahmed)" — until now the UI could only show a bare marker.
+    stop_name: Optional[str] = None
+    is_adhoc: Optional[bool] = None
+    is_shared: Optional[bool] = None
 
 
 class RouteAssignmentResponse(BaseModel):
@@ -103,6 +140,11 @@ class RouteResponse(BaseModel):
     total_distance_km: Optional[float] = None
     total_travel_time_min: Optional[int] = None
     created_at: Optional[str] = None
+    # The real driving path as [lat, lng] pairs, so the map draws roads instead
+    # of straight lines between markers. Null when the haversine fallback ran.
+    route_geometry: Optional[List[List[float]]] = None
+    # Solver-assigned label, e.g. "P22:00:00::VDhaka-Metro-Cha-10-3269".
+    route_code: Optional[str] = None
 
 
 class ScheduleRouteStop(RouteStopResponse):

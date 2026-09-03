@@ -243,11 +243,13 @@ export const mockDrivers: Driver[] = [
   },
 ];
 
-// Office location (Motijheel — Dhaka business district)
+// Office location — Augmedix Bangladesh, Sher-e-Bangla Nagar.
+// Must match backend week_service.OFFICE_LOCATION, which the routing solver
+// uses as its origin for every distance and for the Agargaon Metro rule.
 export const OFFICE_LOCATION = {
-  name: 'Office — Motijheel Commercial Area, Dhaka',
-  latitude: 23.7298,
-  longitude: 90.4182,
+  name: 'Office — Augmedix Bangladesh, Sher-e-Bangla Nagar, Dhaka',
+  latitude: 23.770204034678137,
+  longitude: 90.40845882507914,
 };
 
 // Mock Requests

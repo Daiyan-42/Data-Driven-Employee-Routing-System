@@ -19,8 +19,12 @@ from typing import List
 
 from app.config import settings
 
-# Matches the frontend OFFICE_LOCATION constant.
-OFFICE_LOCATION = {"lat": 23.7298, "lng": 90.4182}
+# Augmedix Bangladesh, Sher-e-Bangla Nagar. This is the single source of truth
+# for the office origin: the routing solver measures every distance, the 120-min
+# cap and the Agargaon Metro main-road rule from here. (It previously read
+# 23.7298/90.4182 — Motijheel — which is ~4.5 km away and made the metro
+# consolidation geometrically nonsensical.)
+OFFICE_LOCATION = {"lat": 23.770204034678137, "lng": 90.40845882507914}
 
 # Canonical key for each day of the service week, in order.
 WEEK_DAY_KEYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")

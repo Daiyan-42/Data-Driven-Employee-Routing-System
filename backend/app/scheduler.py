@@ -12,12 +12,15 @@ from datetime import datetime, time
 
 from app.config import settings
 from app.database import supabase
-from app.services.routing_service import RoutingService
+from app.services.routing_service import ROUTING_LOCK, RoutingService
 from app.services.week_service import deadline_for_target, target_service_week
 
 logger = logging.getLogger("uvicorn.error")
 
-_routing_lock = threading.Lock()
+# Shared with RoutingService so an admin-triggered run and a scheduled one cannot
+# interleave. It is an RLock, so holding it here and calling run_service_date —
+# which takes it again on this thread — is fine.
+_routing_lock = ROUTING_LOCK
 # Service-week keys (target Sunday ISO date) already routed this process run.
 _processed_weeks: set[str] = set()
 
@@ -25,8 +28,12 @@ _processed_weeks: set[str] = set()
 def run_pending_routing(force: bool = False) -> dict:
     """Route the week whose request window has closed, once.
 
-    Idempotent: requests already carrying a route_id are skipped, so re-runs
-    after a successful pass create no duplicate routes. Returns a summary dict.
+    Idempotent by replacement: each service date's previous solve is deleted and
+    rewritten, so re-runs converge rather than duplicating routes.
+
+    Note this can take minutes per service date — the solver simulates the whole
+    night and queries OSRM — so never call it directly from the event loop. Both
+    call sites use `asyncio.to_thread`.
     """
     with _routing_lock:
         now = datetime.now()
@@ -66,9 +73,9 @@ def run_daily_rerouting(force: bool = False) -> dict:
 
     The weekly pass at Saturday 11:59 PM routes the whole week in advance; the
     nightly pass then picks up the same-day ad-hoc rows (submitted before 7 PM,
-    three hours before the 10 PM shift) and rebuilds those employees' routes.
-    Idempotent: routing only touches Pending requests without a route_id, and
-    ad-hoc supersedes the weekly request via the newest-wins rule.
+    three hours before the 10 PM shift) and rebuilds the day. The ad-hoc
+    supersedes the weekly request via the newest-wins rule, and because the solve
+    replaces the whole date, the superseded weekly route disappears with it.
     """
     with _routing_lock:
         now = datetime.now()

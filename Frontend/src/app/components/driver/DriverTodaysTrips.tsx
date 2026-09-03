@@ -309,6 +309,7 @@ export const DriverTodaysTrips: React.FC = () => {
                               })),
                             ]}
                             showRoute
+                            routeGeometry={route.route_geometry}
                             height="380px"
                             lazy
                           />
@@ -348,11 +349,20 @@ export const DriverTodaysTrips: React.FC = () => {
                                     <div className="flex-1">
                                       <div className="flex items-center justify-between mb-1 gap-3">
                                         <div className="min-w-0">
-                                          <AddressText
-                                            lat={stop.latitude}
-                                            lng={stop.longitude}
-                                            className="text-sm font-medium text-white truncate"
-                                          />
+                                          {/* The solver names its own stops ("Agargaon Metro
+                                              Station", "Mazar Road Bus Stop"); that beats a
+                                              reverse-geocoded street, and skips the lookup. */}
+                                          {stop.stop_name ? (
+                                            <p className="text-sm font-medium text-white truncate">
+                                              {stop.stop_name}
+                                            </p>
+                                          ) : (
+                                            <AddressText
+                                              lat={stop.latitude}
+                                              lng={stop.longitude}
+                                              className="text-sm font-medium text-white truncate"
+                                            />
+                                          )}
                                           {stop.latitude != null && stop.longitude != null && (
                                             <p className="text-xs text-slate-600 font-mono mt-0.5">
                                               {stop.latitude.toFixed(5)}, {stop.longitude.toFixed(5)}

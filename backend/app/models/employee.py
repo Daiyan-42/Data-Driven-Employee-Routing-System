@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel
 from app.models.common import Pagination
@@ -63,6 +63,13 @@ class StopInfo(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     arrival_time: Optional[str] = None
+    departure_time: Optional[str] = None
+    # Named by the solver, so the employee sees "Mazar Road Bus Stop" rather than
+    # a pair of coordinates. `is_shared` marks the Agargaon Metro consolidation
+    # point, which is why several colleagues alight together there.
+    stop_name: Optional[str] = None
+    is_adhoc: Optional[bool] = None
+    is_shared: Optional[bool] = None
 
 
 class DriverInfo(BaseModel):
@@ -77,11 +84,31 @@ class VehicleInfo(BaseModel):
     capacity: Optional[int] = None
 
 
+class ScheduleLeg(BaseModel):
+    """One half of an employee's night: the ride in, or the ride home."""
+    route_id: int
+    route_type: str  # "pickup" | "dropoff"
+    shift_time: Optional[str] = None
+    route_geometry: Optional[List[List[float]]] = None
+    stop: StopInfo
+    driver: Optional[DriverInfo] = None
+    vehicle: Optional[VehicleInfo] = None
+
+
 class ScheduleResponse(BaseModel):
     service_date: str
+    # An employee normally has TWO routes on a service date — the pickup that
+    # brings them to the office and the dropoff that takes them home. Both carry
+    # the same service_date, because Case C reuses the pickup's vehicle for the
+    # dropoff and so needs them on one night.
+    pickup: Optional[ScheduleLeg] = None
+    dropoff: Optional[ScheduleLeg] = None
+    # The flat fields mirror `pickup` (or `dropoff`, on a dropoff-only day) so
+    # consumers written against the earlier single-leg shape keep working.
     route_id: Optional[int] = None
     route_type: Optional[str] = None
     shift_time: Optional[str] = None
+    route_geometry: Optional[List[List[float]]] = None
     stop: Optional[StopInfo] = None
     driver: Optional[DriverInfo] = None
     vehicle: Optional[VehicleInfo] = None

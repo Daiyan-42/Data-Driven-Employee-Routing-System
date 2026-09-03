@@ -11,8 +11,28 @@ import { useAuth } from '../../context/AuthContext';
 import { adminApi, driverApi, dropoffRequestApi, employeeApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
 import type { Driver, DropoffRequest, PickupRequest, Vehicle, PickupRoutingInputResponse, RoutingRunResponse, ScheduleSummaryResponse, RouteDetailResponse } from '../../types/api';
 import { InteractiveMap } from '../shared/InteractiveMap';
+import { OFFICE_LOCATION } from '../../data/mockData';
 
 type AdminView = 'overview' | 'employees' | 'drivers' | 'vehicles' | 'requests' | 'routing';
+
+// The solver's `reason` codes, and what an admin should actually do about each.
+const UNASSIGNED_REASON_LABELS: Record<string, string> = {
+  no_coordinates: 'Missing home coordinates',
+  no_vehicle_available: 'No vehicle available',
+  dropped_for_120min_cap: 'Dropped to keep the route under 120 min',
+  vehicle_not_free_in_time: 'No vehicle free in time',
+};
+
+const UNASSIGNED_REASON_HINTS: Record<string, string> = {
+  no_coordinates:
+    'A roster data problem, not a routing failure — these employees have no home latitude/longitude, so no stop can be placed. Fix the employee records and re-run.',
+  no_vehicle_available:
+    'Every vehicle for this shift was already full or out of zone. Add fleet capacity for this shift.',
+  dropped_for_120min_cap:
+    'The stop was shed to keep the route within the 120-minute limit. Splitting the group across two vehicles would seat them.',
+  vehicle_not_free_in_time:
+    'The vehicle that should serve this request is still finishing an earlier trip. More fleet, or a wider gap between shifts, resolves it.',
+};
 
 interface AdminEmployee {
   id: string;
@@ -68,8 +88,11 @@ export const AdminDashboard: React.FC = () => {
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [requestActionLoading, setRequestActionLoading] = useState(false);
-  const [officeLat, setOfficeLat] = useState(23.7298);
-  const [officeLng, setOfficeLng] = useState(90.4182);
+  // Overrides, pre-filled with the real office. The backend defaults to the same
+  // value when these are omitted; sending a stale coordinate would move the
+  // solver's origin and skew every distance, the 120-min cap and the metro rule.
+  const [officeLat, setOfficeLat] = useState(OFFICE_LOCATION.latitude);
+  const [officeLng, setOfficeLng] = useState(OFFICE_LOCATION.longitude);
 
   const loadAdminApiData = async () => {
     setApiLoading(true);
@@ -814,6 +837,14 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Routing solves the <span className="text-slate-400">entire service date</span> in one
+                  pass — pickups and drop-offs together — because each vehicle's drop-off assignment
+                  depends on where its pickup route left it. The two buttons run the same solve and
+                  differ only in which half is shown below. Re-running replaces the date's routes
+                  rather than adding to them.
+                </p>
+
                 {/* Action buttons */}
                 <div className="flex items-center gap-3 flex-wrap">
                   <button
@@ -845,7 +876,7 @@ export const AdminDashboard: React.FC = () => {
                     ) : (
                       <>
                         <Play className="w-4 h-4" />
-                        Run Pickup Routing
+                        Run Routing · Pickup View
                       </>
                     )}
                   </button>
@@ -862,7 +893,7 @@ export const AdminDashboard: React.FC = () => {
                     ) : (
                       <>
                         <Play className="w-4 h-4" />
-                        Run Dropoff Routing
+                        Run Routing · Dropoff View
                       </>
                     )}
                   </button>
@@ -906,27 +937,116 @@ export const AdminDashboard: React.FC = () => {
               )}
 
               {/* Routing run result */}
-              {routingRunResult && (
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-emerald-400" />
-                    <div>
-                      <p className="text-sm font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                        {routingType === 'pickup' ? 'Pickup' : 'Dropoff'} Routing Complete
-                      </p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {routingRunResult.routes_created} routes · {routingRunResult.employees_assigned} assigned
-                        {routingRunResult.unassigned_pickup_ids.length > 0 && (
-                          <> · <span className="text-amber-400">{routingRunResult.unassigned_pickup_ids.length} unassigned</span></>
+              {routingRunResult && (() => {
+                const unassigned = routingRunResult.unassigned ?? [];
+                // Fall back to the legacy id list when the backend only sent that.
+                const unassignedCount = unassigned.length || routingRunResult.unassigned_pickup_ids.length;
+                const byReason = unassigned.reduce<Record<string, typeof unassigned>>((acc, u) => {
+                  (acc[u.reason] ||= []).push(u);
+                  return acc;
+                }, {});
+                const warnings = routingRunResult.warnings ?? [];
+                const isFallback = routingRunResult.engine === 'haversine';
+
+                return (
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5 space-y-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                          Routing Complete — {routingType === 'pickup' ? 'Pickup' : 'Dropoff'} View
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {routingRunResult.routes_created} routes · {routingRunResult.employees_assigned} assigned
+                          {unassignedCount > 0 && (
+                            <> · <span className="text-amber-400">{unassignedCount} unassigned</span></>
+                          )}
+                        </p>
+                        {routingRunResult.message && (
+                          <p className="text-xs text-slate-500 mt-1">{routingRunResult.message}</p>
                         )}
-                      </p>
-                      {routingRunResult.message && (
-                        <p className="text-xs text-slate-500 mt-1">{routingRunResult.message}</p>
-                      )}
+                      </div>
                     </div>
+
+                    {/* Which distance engine ran. A haversine run means straight-line
+                        estimates and no road geometry, so the numbers below and the
+                        map lines are approximate — say so rather than let it pass. */}
+                    {routingRunResult.engine && (
+                      <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${isFallback ? 'border-amber-500/25 bg-amber-500/5 text-amber-300' : 'border-white/8 bg-white/3 text-slate-400'}`}>
+                        <Navigation className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        {isFallback ? (
+                          <span>
+                            <span className="font-semibold">Straight-line fallback</span> — the OSRM road
+                            server was unreachable, so distances and times are estimates and the map
+                            draws dashed direct lines instead of streets. Route structure is still valid.
+                          </span>
+                        ) : (
+                          <span>Distances and times from the OSRM road network ({routingRunResult.engine}).</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Data-quality problems that are NOT unassigned requests — e.g. a
+                        vehicle with no parking coordinates, which silently left the fleet. */}
+                    {warnings.length > 0 && (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                        <p className="text-xs font-semibold text-amber-400 mb-2 uppercase tracking-wider">
+                          Data warnings ({warnings.length})
+                        </p>
+                        <ul className="space-y-1">
+                          {warnings.map((w, i) => (
+                            <li key={i} className="text-xs text-slate-400 flex gap-2">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-500/70 shrink-0 mt-0.5" />
+                              <span>{w}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Unassigned, grouped by reason — the reason decides who acts on it. */}
+                    {unassigned.length > 0 && (
+                      <div className="rounded-lg border border-white/8 bg-white/3 p-3">
+                        <p className="text-xs font-semibold text-amber-400 mb-3 uppercase tracking-wider">
+                          Unassigned ({unassigned.length})
+                        </p>
+                        <div className="space-y-3">
+                          {Object.entries(byReason).map(([reason, entries]) => (
+                            <div key={reason}>
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <span className="text-xs font-medium text-white">
+                                  {UNASSIGNED_REASON_LABELS[reason] ?? reason}
+                                </span>
+                                <span className="text-xs text-slate-500">{entries.length}</span>
+                              </div>
+                              <p className="text-xs text-slate-500 mb-2 leading-relaxed">
+                                {UNASSIGNED_REASON_HINTS[reason] ?? 'See the solver log for details.'}
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {entries.slice(0, 12).map((u, i) => (
+                                  <span
+                                    key={`${u.employee_id ?? u.employee_email ?? i}`}
+                                    className="px-2 py-0.5 rounded border border-white/8 bg-white/4 text-xs text-slate-400"
+                                    title={[u.employee_email, u.shift_time, u.plate_no].filter(Boolean).join(' · ')}
+                                  >
+                                    {u.employee_name || u.employee_email || `Employee #${u.employee_id ?? '—'}`}
+                                    {u.shift_time && <span className="text-slate-600"> · {String(u.shift_time).slice(0, 5)}</span>}
+                                  </span>
+                                ))}
+                                {entries.length > 12 && (
+                                  <span className="px-2 py-0.5 text-xs text-slate-600">
+                                    +{entries.length - 12} more
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Schedule results */}
               {routingResult && routingResult.routes.length > 0 && (
@@ -973,10 +1093,11 @@ export const AdminDashboard: React.FC = () => {
                         {/* Map */}
                         <div style={{ padding: '0 16px 16px' }}>
                           <InteractiveMap
-                            center={sortedStops.length > 0 ? [sortedStops[0].latitude, sortedStops[0].longitude] : [23.7298, 90.4182]}
+                            center={sortedStops.length > 0 ? [sortedStops[0].latitude, sortedStops[0].longitude] : [OFFICE_LOCATION.latitude, OFFICE_LOCATION.longitude]}
                             zoom={12}
                             markers={mapMarkers}
                             showRoute={true}
+                            routeGeometry={route.route_geometry}
                             height="280px"
                             lazy
                           />
@@ -995,9 +1116,26 @@ export const AdminDashboard: React.FC = () => {
                                 )}
                               </div>
                               <div className="flex-1 pb-2">
-                                <p className="text-sm text-white font-medium">
-                                  {stop.passengers.length === 0 ? 'Office' : stop.passengers.map(p => p.employee_name || `Employee #${p.employee_id}`).join(', ')}
-                                </p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm text-white font-medium">
+                                    {stop.stop_name || (stop.passengers.length === 0 ? 'Office' : `${stop.passengers.length} passenger(s)`)}
+                                  </p>
+                                  {stop.is_shared && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 font-medium">
+                                      shared drop
+                                    </span>
+                                  )}
+                                  {stop.is_adhoc && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-medium">
+                                      ad-hoc
+                                    </span>
+                                  )}
+                                </div>
+                                {stop.passengers.length > 0 && (
+                                  <p className="text-xs text-slate-400">
+                                    {stop.passengers.map(p => p.employee_name || `Employee #${p.employee_id}`).join(', ')}
+                                  </p>
+                                )}
                                 <p className="text-xs text-slate-500 font-mono">{stop.arrival_time || '—'} → {stop.departure_time || '—'}</p>
                                 <p className="text-xs text-slate-700">{stop.latitude.toFixed(5)}, {stop.longitude.toFixed(5)}</p>
                               </div>
