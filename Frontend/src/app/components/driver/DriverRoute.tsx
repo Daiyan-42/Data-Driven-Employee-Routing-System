@@ -291,6 +291,7 @@ export const DriverRoute: React.FC = () => {
                             color: '#2563EB',
                           }))}
                           showRoute={route.stops.length > 1}
+                          routeGeometry={route.route_geometry}
                           height="400px"
                           lazy
                         />

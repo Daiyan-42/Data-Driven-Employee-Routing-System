@@ -19,6 +19,14 @@ interface MapPickerProps {
     color?: string;
   }>;
   showRoute?: boolean;
+  /**
+   * Road-following path from the solver, as [lat, lng] pairs. When present and
+   * `showRoute` is on, it is drawn as a solid line instead of the dashed
+   * marker-to-marker guess — the actual streets the vehicle drives. Omitted or
+   * null (e.g. the backend ran the haversine fallback) keeps the dashed line,
+   * which is honest about being an approximation.
+   */
+  routeGeometry?: [number, number][] | null;
   height?: string;
   /**
    * Mount the map only once it scrolls into view. Use on pages that render
@@ -78,6 +86,7 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
   onLocationSelect,
   markers = [],
   showRoute = false,
+  routeGeometry = null,
   height = '420px',
   lazy = false,
 }) => {
@@ -180,17 +189,31 @@ export const InteractiveMap: React.FC<MapPickerProps> = ({
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     if (polylineRef.current) { polylineRef.current.remove(); polylineRef.current = null; }
+    if (!showRoute) return;
 
-    if (showRoute && markers.length > 1) {
-      const positions = markers.map(m => m.position as L.LatLngExpression);
-      polylineRef.current = L.polyline(positions, {
+    // Guard against a truncated or malformed geometry rather than handing
+    // Leaflet a bad LatLng and blanking the whole map.
+    const road = (routeGeometry || []).filter(
+      p => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]),
+    );
+
+    if (road.length > 1) {
+      polylineRef.current = L.polyline(road as L.LatLngExpression[], {
+        color: '#0EA5E9',
+        weight: 4,
+        opacity: 0.9,
+      }).addTo(mapInstanceRef.current);
+    } else if (markers.length > 1) {
+      // No geometry — dash it, so nobody mistakes a straight hop between stops
+      // for a real driving path.
+      polylineRef.current = L.polyline(markers.map(m => m.position as L.LatLngExpression), {
         color: '#0EA5E9',
         weight: 3,
         opacity: 0.8,
         dashArray: '8, 8',
       }).addTo(mapInstanceRef.current);
     }
-  }, [markers, showRoute]);
+  }, [markers, showRoute, routeGeometry, visible]);
 
   return (
     <div

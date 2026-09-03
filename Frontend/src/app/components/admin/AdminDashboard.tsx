@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router';
 import {
   Users, Car, Truck, ClipboardList, Route, LogOut,
   Plus, Trash2, Key, Eye, Search, Filter, ChevronDown,
-  Bus, MapPin, Clock, CheckCircle, AlertCircle, Play,
+  Bus, MapPin, Clock, AlertCircle,
   X, Edit, Phone, Mail, Hash, UserCog,
-  Navigation, BarChart3, Shield, Zap,
+  BarChart3, Shield,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { adminApi, driverApi, dropoffRequestApi, employeeApi, pickupRequestApi, vehicleApi } from '../../services/transportApi';
-import type { Driver, DropoffRequest, PickupRequest, Vehicle, PickupRoutingInputResponse, RoutingRunResponse, RunAllRoutingResponse, ScheduleSummaryResponse, RouteDetailResponse } from '../../types/api';
+import type { Driver, DropoffRequest, PickupRequest, Vehicle, PickupRoutingInputResponse, ScheduleSummaryResponse, RouteDetailResponse } from '../../types/api';
 import { InteractiveMap } from '../shared/InteractiveMap';
+import { OFFICE_LOCATION } from '../../data/mockData';
 
 type AdminView = 'overview' | 'employees' | 'drivers' | 'vehicles' | 'requests' | 'routing';
 
@@ -63,15 +64,10 @@ export const AdminDashboard: React.FC = () => {
   const [actionSaving, setActionSaving] = useState(false);
   const [viewEmpDetail, setViewEmpDetail] = useState<AdminEmployee | null>(null);
   const [routingResult, setRoutingResult] = useState<ScheduleSummaryResponse | null>(null);
-  const [routingRunResult, setRoutingRunResult] = useState<RoutingRunResponse | null>(null);
   const [selectedShiftFilter, setSelectedShiftFilter] = useState('all');
   const [selectedDateFilter, setSelectedDateFilter] = useState('all');
   const [routingShift, setRoutingShift] = useState('22:00');
   const [routingDate, setRoutingDate] = useState(new Date().toISOString().split('T')[0]);
-  const [isRouting, setIsRouting] = useState(false);
-  const [routingType, setRoutingType] = useState<'pickup' | 'dropoff'>('pickup');
-  const [runAllResult, setRunAllResult] = useState<RunAllRoutingResponse | null>(null);
-  const [isRunningAll, setIsRunningAll] = useState(false);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [pickupRequests, setPickupRequests] = useState<PickupRequest[]>([]);
@@ -81,8 +77,6 @@ export const AdminDashboard: React.FC = () => {
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [requestActionLoading, setRequestActionLoading] = useState(false);
-  const [officeLat, setOfficeLat] = useState(23.7298);
-  const [officeLng, setOfficeLng] = useState(90.4182);
 
   const loadAdminApiData = async () => {
     setApiLoading(true);
@@ -211,38 +205,6 @@ export const AdminDashboard: React.FC = () => {
       setApiError(err instanceof Error ? err.message : 'Could not load preview.');
     } finally {
       setApiLoading(false);
-    }
-  };
-
-  const runRouting = async (type: 'pickup' | 'dropoff') => {
-    setIsRouting(true);
-    setApiError(null);
-    setRoutingResult(null);
-    setRoutingRunResult(null);
-    try {
-      let result: RoutingRunResponse;
-      if (type === 'pickup') {
-        result = await adminApi.runPickupRouting({
-          service_date: routingDate,
-          shift_start_time: routingShift,
-          office_lat: officeLat,
-          office_lng: officeLng,
-        });
-      } else {
-        result = await adminApi.runDropoffRouting({
-          service_date: routingDate,
-          shift_end_time: routingShift,
-          office_lat: officeLat,
-          office_lng: officeLng,
-        });
-      }
-      setRoutingRunResult(result);
-      setRoutingType(type);
-      await loadScheduleSummary();
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : 'Could not run routing.');
-    } finally {
-      setIsRouting(false);
     }
   };
 
@@ -789,10 +751,11 @@ export const AdminDashboard: React.FC = () => {
               {/* Routing controls */}
               <div className="rounded-xl border border-white/8 bg-card p-6">
                 <h3 className="text-base font-semibold text-white mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                  Run Routing Algorithm
+                  Routing
                 </h3>
                 <p className="text-sm text-slate-500 mb-6">
-                  Select date and shift time, then preview request counts or trigger routing for pickup/dropoff.
+                  Routing runs automatically once the weekly request window closes. Pick a date and
+                  shift to preview request counts or view the routes the solver produced.
                 </p>
 
                 {/* ── Run All (every pending request, any date/shift) ── */}
@@ -888,7 +851,7 @@ export const AdminDashboard: React.FC = () => {
                     <input
                       type="date"
                       value={routingDate}
-                      onChange={e => { setRoutingDate(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); setRoutingRunResult(null); }}
+                      onChange={e => { setRoutingDate(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); }}
                       className="px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                     />
                   </div>
@@ -896,7 +859,7 @@ export const AdminDashboard: React.FC = () => {
                     <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Shift Time</label>
                     <select
                       value={routingShift}
-                      onChange={e => { setRoutingShift(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); setRoutingRunResult(null); }}
+                      onChange={e => { setRoutingShift(e.target.value); setPickupPreview(null); setDropoffPreview(null); setRoutingResult(null); }}
                       className="px-3 py-2.5 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
                     >
                       <option value="22:00">22:00</option>
@@ -909,26 +872,6 @@ export const AdminDashboard: React.FC = () => {
                       <option value="05:00">05:00</option>
                       <option value="06:00">06:00</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Office Lat</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={officeLat}
-                      onChange={e => setOfficeLat(Number(e.target.value))}
-                      className="w-24 px-2 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-2 uppercase tracking-wider">Office Lng</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={officeLng}
-                      onChange={e => setOfficeLng(Number(e.target.value))}
-                      className="w-24 px-2 py-2 rounded-lg border border-white/8 bg-white/4 text-white text-sm focus:outline-none focus:border-sky-500/40 transition"
-                    />
                   </div>
                 </div>
 
@@ -949,40 +892,6 @@ export const AdminDashboard: React.FC = () => {
                   >
                     <Eye className="w-4 h-4" />
                     Preview Dropoff
-                  </button>
-                  <button
-                    onClick={() => runRouting('pickup')}
-                    disabled={isRouting}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm transition disabled:opacity-60"
-                  >
-                    {isRouting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Computing...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4" />
-                        Run Pickup Routing
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => runRouting('dropoff')}
-                    disabled={isRouting}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white font-semibold text-sm transition disabled:opacity-60"
-                  >
-                    {isRouting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Computing...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4" />
-                        Run Dropoff Routing
-                      </>
-                    )}
                   </button>
                   <button
                     onClick={loadScheduleSummary}
@@ -1020,29 +929,6 @@ export const AdminDashboard: React.FC = () => {
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Routing run result */}
-              {routingRunResult && (
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-emerald-400" />
-                    <div>
-                      <p className="text-sm font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                        {routingType === 'pickup' ? 'Pickup' : 'Dropoff'} Routing Complete
-                      </p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {routingRunResult.routes_created} routes · {routingRunResult.employees_assigned} assigned
-                        {routingRunResult.unassigned_pickup_ids.length > 0 && (
-                          <> · <span className="text-amber-400">{routingRunResult.unassigned_pickup_ids.length} unassigned</span></>
-                        )}
-                      </p>
-                      {routingRunResult.message && (
-                        <p className="text-xs text-slate-500 mt-1">{routingRunResult.message}</p>
-                      )}
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -1091,10 +977,11 @@ export const AdminDashboard: React.FC = () => {
                         {/* Map */}
                         <div style={{ padding: '0 16px 16px' }}>
                           <InteractiveMap
-                            center={sortedStops.length > 0 ? [sortedStops[0].latitude, sortedStops[0].longitude] : [23.7298, 90.4182]}
+                            center={sortedStops.length > 0 ? [sortedStops[0].latitude, sortedStops[0].longitude] : [OFFICE_LOCATION.latitude, OFFICE_LOCATION.longitude]}
                             zoom={12}
                             markers={mapMarkers}
                             showRoute={true}
+                            routeGeometry={route.route_geometry}
                             height="280px"
                             lazy
                           />
@@ -1113,9 +1000,26 @@ export const AdminDashboard: React.FC = () => {
                                 )}
                               </div>
                               <div className="flex-1 pb-2">
-                                <p className="text-sm text-white font-medium">
-                                  {stop.passengers.length === 0 ? 'Office' : stop.passengers.map(p => p.employee_name || `Employee #${p.employee_id}`).join(', ')}
-                                </p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm text-white font-medium">
+                                    {stop.stop_name || (stop.passengers.length === 0 ? 'Office' : `${stop.passengers.length} passenger(s)`)}
+                                  </p>
+                                  {stop.is_shared && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 font-medium">
+                                      shared drop
+                                    </span>
+                                  )}
+                                  {stop.is_adhoc && (
+                                    <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-medium">
+                                      ad-hoc
+                                    </span>
+                                  )}
+                                </div>
+                                {stop.passengers.length > 0 && (
+                                  <p className="text-xs text-slate-400">
+                                    {stop.passengers.map(p => p.employee_name || `Employee #${p.employee_id}`).join(', ')}
+                                  </p>
+                                )}
                                 <p className="text-xs text-slate-500 font-mono">{stop.arrival_time || '—'} → {stop.departure_time || '—'}</p>
                                 <p className="text-xs text-slate-700">{stop.latitude.toFixed(5)}, {stop.longitude.toFixed(5)}</p>
                               </div>

@@ -122,6 +122,11 @@ export interface DriverAssignmentPassenger {
   boarded?: boolean | null;
 }
 
+/** A drawable path as [lat, lng] pairs, straight from OSRM's road geometry.
+ * Null when the backend fell back to haversine, in which case the map should
+ * draw the dashed marker-to-marker line instead of pretending it knows roads. */
+export type RouteGeometry = [number, number][];
+
 export interface DriverAssignmentStop {
   stop_id?: number | null;
   route_id?: number | null;
@@ -130,6 +135,10 @@ export interface DriverAssignmentStop {
   sequence_order?: number | null;
   arrival_time?: string | null;
   departure_time?: string | null;
+  /** "Mazar Road Bus Stop", "Agargaon Metro Station (shared drop point)", ... */
+  stop_name?: string | null;
+  is_adhoc?: boolean | null;
+  is_shared?: boolean | null;
   passengers: DriverAssignmentPassenger[];
 }
 
@@ -143,6 +152,8 @@ export interface DriverAssignmentRoute {
   total_distance_km?: number | null;
   total_travel_time_min?: number | null;
   created_at?: string | null;
+  route_geometry?: RouteGeometry | null;
+  route_code?: string | null;
   stops: DriverAssignmentStop[];
   assignment?: {
     assignment_id?: number | null;
@@ -301,16 +312,38 @@ export interface AdhocRequestView {
   };
 }
 
+export interface ScheduleStop {
+  sequence_order: number;
+  latitude: number;
+  longitude: number;
+  arrival_time?: string;
+  departure_time?: string;
+  stop_name?: string | null;
+  is_adhoc?: boolean | null;
+  is_shared?: boolean | null;
+}
+
+/** One half of the night: the ride in, or the ride home. */
+export interface ScheduleLeg {
+  route_id: number;
+  route_type: "pickup" | "dropoff";
+  shift_time?: string;
+  route_geometry?: RouteGeometry | null;
+  stop: ScheduleStop;
+  driver?: { name?: string; phone?: string } | null;
+  vehicle?: { plate_no?: string; capacity?: number } | null;
+}
+
 export interface ScheduleResponse {
   routing_done: boolean;
+  /** Both legs share one service_date, so both are returned. */
+  pickup?: ScheduleLeg | null;
+  dropoff?: ScheduleLeg | null;
+  /** Mirrors `pickup` (or `dropoff`, on a dropoff-only day). */
   route_type?: "pickup" | "dropoff";
   shift_time?: string;
-  stop?: {
-    sequence_order: number;
-    latitude: number;
-    longitude: number;
-    arrival_time?: string;
-  };
+  route_geometry?: RouteGeometry | null;
+  stop?: ScheduleStop;
   driver?: {
     name?: string;
     phone?: string;
@@ -343,8 +376,8 @@ export interface PickupRoutingInputResponse {
 export interface PickupRoutingRunPayload {
   service_date: string;
   shift_start_time?: string | null;
-  office_lat: number;
-  office_lng: number;
+  office_lat?: number;
+  office_lng?: number;
   office_buffer_minutes?: number;
   stop_dwell_minutes?: number;
   average_speed_kmph?: number;
@@ -353,17 +386,44 @@ export interface PickupRoutingRunPayload {
 export interface DropoffRoutingRunPayload {
   service_date: string;
   shift_end_time?: string | null;
-  office_lat: number;
-  office_lng: number;
+  office_lat?: number;
+  office_lng?: number;
   office_buffer_minutes?: number;
   stop_dwell_minutes?: number;
   average_speed_kmph?: number;
 }
 
+/** Why one request could not be placed. The reason decides who acts:
+ *  `no_coordinates` is a roster data problem, `no_vehicle_available` means the
+ *  fleet is short for that shift, and the other two are schedule pressure. */
+export interface UnassignedEntry {
+  employee_id?: number | null;
+  employee_name?: string | null;
+  employee_email?: string | null;
+  request_type: "pickup" | "dropoff";
+  shift_time?: string | null;
+  reason:
+    | "no_coordinates"
+    | "no_vehicle_available"
+    | "dropped_for_120min_cap"
+    | "vehicle_not_free_in_time"
+    | string;
+  vehicle_id?: number | null;
+  plate_no?: string | null;
+}
+
 export interface RoutingRunResponse {
   routes_created: number;
   employees_assigned: number;
+  /** Legacy bare-id list, kept so nothing that reads it breaks. */
   unassigned_pickup_ids: number[];
+  unassigned?: UnassignedEntry[];
+  /** "osrm" | "haversine" — a haversine run means approximate distances and no
+   *  road geometry, which is worth telling the admin rather than hiding. */
+  engine?: string | null;
+  /** Data-quality problems that are NOT unassigned requests, e.g. a vehicle
+   *  with no parking coordinates. */
+  warnings?: string[];
   message?: string | null;
 }
 
@@ -404,6 +464,10 @@ export interface RouteStopResponse {
   sequence_order: number;
   arrival_time?: string | null;
   departure_time?: string | null;
+  /** "Mazar Road Bus Stop", "Agargaon Metro Station (shared drop point)", ... */
+  stop_name?: string | null;
+  is_adhoc?: boolean | null;
+  is_shared?: boolean | null;
   passengers: RouteStopPassenger[];
 }
 
@@ -417,6 +481,8 @@ export interface RouteDetailResponse {
   total_distance_km?: number | null;
   total_travel_time_min?: number | null;
   created_at?: string | null;
+  route_geometry?: RouteGeometry | null;
+  route_code?: string | null;
   stops: RouteStopResponse[];
   assignment?: RouteAssignmentResponse | null;
 }

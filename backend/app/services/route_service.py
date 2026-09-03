@@ -105,6 +105,8 @@ class RouteService:
             total_distance_km=row.get("total_distance_km"),
             total_travel_time_min=row.get("total_travel_time_min"),
             created_at=row.get("created_at"),
+            route_geometry=row.get("route_geometry"),
+            route_code=row.get("route_code"),
             stops=stops,
             assignment=assignment,
         )
@@ -128,6 +130,9 @@ class RouteService:
             "sequence_order": row["sequence_order"],
             "arrival_time": row.get("arrival_time"),
             "departure_time": row.get("departure_time"),
+            "stop_name": row.get("stop_name"),
+            "is_adhoc": row.get("is_adhoc"),
+            "is_shared": row.get("is_shared"),
             "passengers": passengers,
         }
 

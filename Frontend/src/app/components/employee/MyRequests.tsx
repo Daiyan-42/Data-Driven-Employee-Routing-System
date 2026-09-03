@@ -5,7 +5,7 @@ import { Calendar, CalendarDays, MapPin, Clock, AlertCircle, Car, User as UserIc
 import { InteractiveMap } from '../shared/InteractiveMap';
 import { OFFICE_LOCATION } from '../../data/mockData';
 import { dropoffRequestApi, employeeApi, pickupRequestApi } from '../../services/transportApi';
-import type { DropoffRequest, PickupRequest, RequestStatus, ScheduleResponse } from '../../types/api';
+import type { DropoffRequest, PickupRequest, RequestStatus, ScheduleLeg, ScheduleResponse } from '../../types/api';
 
 type RequestTab = 'all' | 'routed' | 'pending' | 'rejected';
 type CombinedRequest = {
@@ -189,6 +189,68 @@ const groupTitle = (g: WeekGroup): string => {
   const hasAdhoc = g.days.some(d => d.pickup?.requestType === 'Ad-hoc');
   if (hasWeekly && hasAdhoc) return 'Transport Requests';
   return hasWeekly ? 'Weekly Request' : 'Ad-hoc Requests';
+};
+
+/** One leg of the night's assignment — the ride in, or the ride home.
+ *
+ * An employee has both on the same service date, so this renders once per leg
+ * rather than collapsing the night to a single stop. */
+const ScheduleLegDetails: React.FC<{ leg: ScheduleLeg }> = ({ leg }) => {
+  const isPickup = leg.route_type === 'pickup';
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        {isPickup
+          ? <ArrowUpRight className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          : <ArrowDownLeft className="w-4 h-4 text-violet-400 flex-shrink-0" />}
+        <p className="text-sm text-slate-300">
+          {isPickup ? 'Ride to office' : 'Ride home'} · stop {leg.stop.sequence_order}
+          {leg.shift_time ? ` · shift ${leg.shift_time.slice(0, 5)}` : ''}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <MapPin className="w-4 h-4 text-sky-400 flex-shrink-0" />
+        <div className="text-sm">
+          {/* A named stop is the solver's own label — for a shared main-road drop
+              ("Agargaon Metro Station") that is the difference between the
+              employee walking to the right place and expecting a door pickup. */}
+          {leg.stop.stop_name ? (
+            <p className="text-slate-200">{leg.stop.stop_name}</p>
+          ) : (
+            <AddressText lat={leg.stop.latitude} lng={leg.stop.longitude} />
+          )}
+          {leg.stop.is_shared && (
+            <p className="text-xs text-violet-300 mt-0.5">
+              Shared drop point — walk from here to your home.
+            </p>
+          )}
+          <p className="text-xs text-slate-600 font-mono">{coordinateLabel(leg.stop.latitude, leg.stop.longitude)}</p>
+        </div>
+      </div>
+      {leg.stop.arrival_time && (
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <p className="text-sm text-slate-300">
+            {isPickup ? 'Pickup at' : 'Dropoff at'}: {leg.stop.arrival_time}
+          </p>
+        </div>
+      )}
+      {leg.driver && (
+        <div className="flex items-center gap-2">
+          <UserIcon className="w-4 h-4 text-sky-400 flex-shrink-0" />
+          <p className="text-sm text-slate-300">
+            Driver: {leg.driver.name}{leg.driver.phone ? ` · ${leg.driver.phone}` : ''}
+          </p>
+        </div>
+      )}
+      {leg.vehicle && (
+        <div className="flex items-center gap-2">
+          <Car className="w-4 h-4 text-sky-400 flex-shrink-0" />
+          <p className="text-sm text-slate-300">Vehicle: {leg.vehicle.plate_no ?? '—'}</p>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const MyRequests: React.FC = () => {
@@ -395,8 +457,19 @@ export const MyRequests: React.FC = () => {
                   const isExpanded = expandedKey === key;
                   const status = dayStatus(day);
                   const schedule = scheduleCache[day.serviceDate];
+                  // Both halves of the night, in travel order. Usually two; one
+                  // if only that half got routed.
+                  const legs: ScheduleLeg[] = [schedule?.pickup, schedule?.dropoff]
+                    .filter((l): l is ScheduleLeg => Boolean(l));
                   const stopLat = schedule?.routing_done && schedule.stop ? schedule.stop.latitude : (day.pickup?.latitude ?? OFFICE_LOCATION.latitude);
                   const stopLng = schedule?.routing_done && schedule.stop ? schedule.stop.longitude : (day.pickup?.longitude ?? OFFICE_LOCATION.longitude);
+                  // A Case D drop lands at the shared metro point, nowhere near
+                  // the morning pickup, so mark it separately when it differs.
+                  const dropStop = schedule?.dropoff?.stop;
+                  const showDropMarker = Boolean(
+                    dropStop &&
+                    (dropStop.latitude !== stopLat || dropStop.longitude !== stopLng)
+                  );
 
                   return (
                     <div key={key} className="border-t border-white/6 first:border-t-0">
@@ -490,42 +563,22 @@ export const MyRequests: React.FC = () => {
                                       <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
                                       Loading your route...
                                     </div>
-                                  ) : schedule?.routing_done && schedule.stop ? (
-                                    <div className="space-y-2">
-                                      <div className="flex items-center gap-2">
-                                        <Route className="w-4 h-4 text-emerald-400" />
-                                        <p className="text-sm text-slate-300 capitalize">
-                                          {schedule.route_type === 'pickup' ? 'Pickup stop' : 'Dropoff stop'} · stop {schedule.stop.sequence_order}
+                                  ) : schedule?.routing_done && legs.length > 0 ? (
+                                    <div className="space-y-4">
+                                      {legs.map((leg, i) => (
+                                        <div
+                                          key={leg.route_id}
+                                          className={i > 0 ? 'pt-4 border-t border-emerald-500/15' : undefined}
+                                        >
+                                          <ScheduleLegDetails leg={leg} />
+                                        </div>
+                                      ))}
+                                      {legs.length === 1 && (
+                                        <p className="text-xs text-slate-500">
+                                          {legs[0].route_type === 'pickup'
+                                            ? 'Your ride home has not been assigned for this date.'
+                                            : 'Your ride to the office has not been assigned for this date.'}
                                         </p>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <MapPin className="w-4 h-4 text-sky-400 flex-shrink-0" />
-                                        <div className="text-sm">
-                                          <AddressText lat={schedule.stop.latitude} lng={schedule.stop.longitude} />
-                                          <p className="text-xs text-slate-600 font-mono">{coordinateLabel(schedule.stop.latitude, schedule.stop.longitude)}</p>
-                                        </div>
-                                      </div>
-                                      {schedule.stop.arrival_time && (
-                                        <div className="flex items-center gap-2">
-                                          <Clock className="w-4 h-4 text-amber-400" />
-                                          <p className="text-sm text-slate-300">
-                                            {schedule.route_type === 'pickup' ? 'Pickup at' : 'Dropoff at'}: {schedule.stop.arrival_time}
-                                          </p>
-                                        </div>
-                                      )}
-                                      {schedule.driver && (
-                                        <div className="flex items-center gap-2">
-                                          <UserIcon className="w-4 h-4 text-sky-400" />
-                                          <p className="text-sm text-slate-300">
-                                            Driver: {schedule.driver.name}{schedule.driver.phone ? ` · ${schedule.driver.phone}` : ''}
-                                          </p>
-                                        </div>
-                                      )}
-                                      {schedule.vehicle && (
-                                        <div className="flex items-center gap-2">
-                                          <Car className="w-4 h-4 text-sky-400" />
-                                          <p className="text-sm text-slate-300">Vehicle: {schedule.vehicle.plate_no ?? '—'}</p>
-                                        </div>
                                       )}
                                     </div>
                                   ) : (
@@ -553,12 +606,20 @@ export const MyRequests: React.FC = () => {
                                 center={[stopLat, stopLng]}
                                 zoom={14}
                                 markers={[
-                                  { position: [stopLat, stopLng], label: schedule?.routing_done ? 'Your Stop' : 'Your Location', color: '#0EA5E9' },
+                                  { position: [stopLat, stopLng], label: schedule?.routing_done ? (legs.length > 1 ? 'Your Pickup Stop' : 'Your Stop') : 'Your Location', color: '#0EA5E9' },
+                                  ...(showDropMarker && dropStop
+                                    ? [{
+                                        position: [dropStop.latitude, dropStop.longitude] as [number, number],
+                                        label: dropStop.is_shared ? 'Shared Drop Point' : 'Your Drop Stop',
+                                        color: '#8B5CF6',
+                                      }]
+                                    : []),
                                   ...(status === 'Approved'
                                     ? [{ position: [OFFICE_LOCATION.latitude, OFFICE_LOCATION.longitude] as [number, number], label: 'Office', color: '#10B981' }]
                                     : []),
                                 ]}
                                 showRoute={status === 'Approved'}
+                                routeGeometry={schedule?.route_geometry}
                                 height="240px"
                                 lazy
                               />

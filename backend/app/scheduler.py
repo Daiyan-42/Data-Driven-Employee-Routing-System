@@ -1,50 +1,77 @@
 """Automatic routing scheduler.
 
-After the Friday/Saturday request window closes (Saturday 11:59 PM), this
-module routes every pending request for the just-requested week with no admin
-involvement. A background loop started from the FastAPI lifespan checks
-periodically; an admin override endpoint can trigger a run on demand.
+Two unattended passes, driven by a background loop started from the FastAPI
+lifespan:
+
+- Weekly: the current calendar week is always safe to route — its Friday/
+  Saturday request window closed at the end of last week. The first loop tick
+  of each new week (within a minute of the Saturday deadline passing) routes
+  the whole week's pending requests in advance.
+- Ad-hoc: each service day is re-routed at/just after 7 PM (when ad-hoc
+  submissions close, three hours before the 10 PM shift) to fold in the day's
+  ad-hoc requests.
+
+An admin override endpoint can trigger the weekly pass on demand.
 """
 import asyncio
 import logging
 import threading
-from datetime import datetime, time
+from datetime import datetime, timedelta
 
 from app.config import settings
 from app.database import supabase
-from app.services.routing_service import RoutingService
-from app.services.week_service import deadline_for_target, target_service_week
+from app.services.routing_service import ROUTING_LOCK, RoutingService
+from app.services.week_service import ADHOC_CUTOFF_TIME, current_week_start
 
 logger = logging.getLogger("uvicorn.error")
 
-_routing_lock = threading.Lock()
+# Shared with RoutingService so an admin-triggered run and a scheduled one cannot
+# interleave. It is an RLock, so holding it here and calling run_service_date —
+# which takes it again on this thread — is fine.
+_routing_lock = ROUTING_LOCK
 # Service-week keys (target Sunday ISO date) already routed this process run.
 _processed_weeks: set[str] = set()
+# Service dates already rebuilt this process run by the ad-hoc (7 PM) pass.
+# Needed because requests the solver cannot place (no_coordinates, cap drops)
+# stay `Pending` with no route_id, so `pending_counts` never reaches zero for a
+# solved date — without this guard the 60 s loop would re-solve today forever.
+_processed_dates: set[str] = set()
 
 
 def run_pending_routing(force: bool = False) -> dict:
-    """Route the week whose request window has closed, once.
+    """Route the current calendar week's pending requests, once.
 
-    Idempotent: requests already carrying a route_id are skipped, so re-runs
-    after a successful pass create no duplicate routes. Returns a summary dict.
+    The current week (Sunday → Saturday) is always locked and safe to route: its
+    Friday/Saturday request window closed at the end of LAST week, so every
+    regular request for it is already in the DB. Routing therefore needs no
+    deadline comparison — it just must not repeat. `pending_counts` only counts
+    un-routed rows, so already-solved dates (this pass earlier, or a process
+    restart) are skipped automatically.
+
+    Idempotent by replacement: each service date's previous solve is deleted and
+    rewritten, so re-runs converge rather than duplicating routes.
+
+    Note this can take minutes per service date — the solver simulates the whole
+    night and queries OSRM — so never call it directly from the event loop. Both
+    call sites use `asyncio.to_thread`.
     """
     with _routing_lock:
         now = datetime.now()
-        # The request window runs Friday → Saturday 11:59 PM of the CURRENT
-        # week and targets NEXT week's seven days (Sunday → Saturday). Once the
-        # current week's Saturday 23:59:59 passes, route what was just requested.
-        deadline = deadline_for_target(now.date())
-        if not force and now < deadline:
-            return {"ran": False, "reason": "request window still open (closes Saturday 11:59 PM)"}
-
-        service_days = target_service_week(now.date())
-        week_key = service_days[0].isoformat()
+        start = current_week_start(now.date())
+        week_key = start.isoformat()
+        if not force and week_key in _processed_weeks:
+            return {"ran": False, "reason": "current week already routed this process"}
 
         svc = RoutingService(supabase)
         summary = {"ran": False, "weeks": []}
 
-        for service_date in service_days:
-            iso = service_date.isoformat()
+        today = now.date().isoformat()
+        for i in range(7):
+            iso = (start + timedelta(days=i)).isoformat()
+            if iso < today:
+                # earlier this week is already being served — leave its routes
+                # (and any ad-hoc rebuilds) exactly as they were solved
+                continue
             counts = svc.pending_counts(iso)
             if counts["pickup"] == 0 and counts["dropoff"] == 0:
                 continue
@@ -62,25 +89,31 @@ def run_pending_routing(force: bool = False) -> dict:
 
 
 def run_daily_rerouting(force: bool = False) -> dict:
-    """Re-route today after 10 PM so the day's ad-hoc requests get a route.
+    """Re-route today just after 7 PM so the day's ad-hoc requests get a route.
 
-    The weekly pass at Saturday 11:59 PM routes the whole week in advance; the
-    nightly pass then picks up the same-day ad-hoc rows (submitted before 7 PM,
-    three hours before the 10 PM shift) and rebuilds those employees' routes.
-    Idempotent: routing only touches Pending requests without a route_id, and
-    ad-hoc supersedes the weekly request via the newest-wins rule.
+    The weekly pass routes the whole week in advance on its first tick; the
+    nightly pass then fires at/just after 7 PM — when ad-hoc submissions close
+    (three hours before the 10 PM shift) — picks up the day's ad-hoc rows and
+    rebuilds the day. The ad-hoc supersedes the weekly request via the
+    newest-wins rule, and because the solve replaces the whole date, the
+    superseded weekly route disappears with it. Once a day is rebuilt,
+    `pending_counts` drops to zero, so the loop won't repeat the work.
     """
     with _routing_lock:
         now = datetime.now()
-        if not force and now.time() < time(22, 0):
-            return {"ran": False, "reason": "nightly re-routing runs after 10 PM"}
+        if not force and now.time() < ADHOC_CUTOFF_TIME:
+            return {"ran": False, "reason": "ad-hoc re-routing runs after 7 PM (ad-hoc closes at 7 PM)"}
 
         today = now.date().isoformat()
+        if not force and today in _processed_dates:
+            return {"ran": False, "reason": "today already re-routed this process", "service_date": today}
+
         svc = RoutingService(supabase)
         counts = svc.pending_counts(today)
         if counts["pickup"] == 0 and counts["dropoff"] == 0:
             return {"ran": False, "reason": "nothing pending for today", "service_date": today}
 
+        _processed_dates.add(today)
         return {
             "ran": True,
             "service_date": today,
