@@ -124,8 +124,16 @@ const buildGroups = (requests: CombinedRequest[]): WeekGroup[] => {
     return entry;
   };
 
+  const createdMs = (iso?: string | null) => (iso ? new Date(iso).getTime() : 0);
+
   for (const req of pickups) {
-    getOrCreate(req.serviceDate, req.requestType === 'Ad-hoc' ? 'Ad-hoc' : 'Regular').pickup = req;
+    const entry = getOrCreate(req.serviceDate, req.requestType === 'Ad-hoc' ? 'Ad-hoc' : 'Regular');
+    // Duplicate rows on the same (date, type) can exist when a week was edited
+    // after routing. Always show the NEWEST submission, not whichever row the
+    // API happened to return last.
+    if (!entry.pickup || createdMs(req.createdAt) > createdMs(entry.pickup.createdAt)) {
+      entry.pickup = req;
+    }
   }
 
   // Dropoffs carry no request_type — attach each to the pickup on the same date

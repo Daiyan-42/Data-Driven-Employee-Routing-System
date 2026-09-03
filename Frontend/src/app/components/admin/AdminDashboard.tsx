@@ -36,6 +36,17 @@ const SIDEBAR_ITEMS = [
   { id: 'routing' as AdminView, label: 'Routing', icon: Route },
 ];
 
+/** Aggregate the per-date results of a run-all routing into one total. */
+const runAllTotals = (res: RunAllRoutingResponse) =>
+  res.dates.reduce(
+    (acc, d) => ({
+      routes: acc.routes + d.routes_created,
+      assigned: acc.assigned + d.employees_assigned,
+      unassigned: acc.unassigned + d.unassigned,
+    }),
+    { routes: 0, assigned: 0, unassigned: 0 },
+  );
+
 export const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -203,6 +214,25 @@ export const AdminDashboard: React.FC = () => {
       setRoutingResult(summary);
     } catch (err) {
       setApiError(err instanceof Error ? err.message : 'Could not load schedule summary.');
+    }
+  };
+
+  /** Route every pending request (any date / shift) — one click for the demo. */
+  const runAllRouting = async () => {
+    setIsRunningAll(true);
+    setApiError(null);
+    setRunAllResult(null);
+    try {
+      const result = await adminApi.runAllRouting();
+      setRunAllResult(result);
+      if (result.ran) {
+        // Refresh the route list so whatever date is on screen reflects the new routes.
+        await loadScheduleSummary();
+      }
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Could not run routing.');
+    } finally {
+      setIsRunningAll(false);
     }
   };
 
@@ -727,6 +757,92 @@ export const AdminDashboard: React.FC = () => {
                   Routing runs automatically once the weekly request window closes. Pick a date and
                   shift to preview request counts or view the routes the solver produced.
                 </p>
+
+                {/* ── Run All (every pending request, any date/shift) ── */}
+                <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5 mb-6">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex items-start gap-3 max-w-xl">
+                      <Zap className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                          Run All Routing
+                        </h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Routes <span className="text-slate-300">every pending request for every date</span> in one click —
+                          use this after editing requests so the routes are always up to date.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={runAllRouting}
+                      disabled={isRunningAll || isRouting}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isRunningAll ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                          Routing all pending...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4" />
+                          Run All Pending Requests
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {runAllResult && (
+                    <div className="mt-5 pt-4 border-t border-white/8">
+                      {runAllResult.ran ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-3">
+                            <CheckCircle className="w-4 h-4 text-emerald-400" />
+                            <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                              Routing Complete
+                            </span>
+                            {(() => {
+                              const t = runAllTotals(runAllResult);
+                              return (
+                                <span className="text-xs text-slate-400">
+                                  {t.routes} routes · {t.assigned} assigned
+                                  {t.unassigned > 0 && <span className="text-amber-400"> · {t.unassigned} unassigned</span>}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-xs text-slate-500 uppercase tracking-wider">
+                                  <th className="py-2 pr-4 font-medium">Service Date</th>
+                                  <th className="py-2 pr-4 font-medium">Routes</th>
+                                  <th className="py-2 pr-4 font-medium">Employees Assigned</th>
+                                  <th className="py-2 font-medium">Unassigned</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {runAllResult.dates.map(d => (
+                                  <tr key={d.service_date} className="border-t border-white/5 text-white">
+                                    <td className="py-2 pr-4 font-mono text-xs">{d.service_date}</td>
+                                    <td className="py-2 pr-4">{d.routes_created}</td>
+                                    <td className="py-2 pr-4">{d.employees_assigned}</td>
+                                    <td className="py-2">{d.unassigned}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm text-slate-400">
+                          <AlertCircle className="w-4 h-4 text-slate-500" />
+                          {runAllResult.reason ?? 'Nothing to route right now.'}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Date and shift selectors */}
                 <div className="flex items-end gap-4 flex-wrap mb-6">

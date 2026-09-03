@@ -122,6 +122,56 @@ def run_daily_rerouting(force: bool = False) -> dict:
         }
 
 
+def run_all_pending(force: bool = True) -> dict:
+    """Route every currently-pending request, across all service dates.
+
+    Finds each service date that still has a Pending pickup or dropoff request
+    with no route_id and runs that whole day (pickup + dropoff, newest request
+    per employee wins). Date-agnostic — unlike the weekly/nightly passes it also
+    picks up stragglers on other dates, which is what backs the admin "Run All"
+    button after manual edits. Idempotent.
+    """
+    with _routing_lock:
+        svc = RoutingService(supabase)
+        dates: set[str] = set()
+        for table_name in ("pickup_request", "dropoff_request"):
+            res = (
+                supabase.table(table_name)
+                .select("service_date")
+                .eq("status", "Pending")
+                .is_("route_id", None)
+                .execute()
+            )
+            for row in res.data or []:
+                if row.get("service_date"):
+                    dates.add(row["service_date"])
+
+        if not dates:
+            return {"ran": False, "reason": "no pending requests to route", "dates": []}
+
+        def _totals(result: dict) -> tuple:
+            created = assigned = unassigned = 0
+            for leg in (result.get("pickup"), result.get("dropoff")):
+                if leg is not None:
+                    created += leg.routes_created
+                    assigned += leg.employees_assigned
+                    unassigned += len(leg.unassigned_pickup_ids)
+            return created, assigned, unassigned
+
+        summary = {"ran": True, "dates": []}
+        for iso in sorted(dates):
+            created, assigned, unassigned = _totals(svc.run_service_date(iso))
+            summary["dates"].append(
+                {
+                    "service_date": iso,
+                    "routes_created": created,
+                    "employees_assigned": assigned,
+                    "unassigned": unassigned,
+                }
+            )
+        return summary
+
+
 async def start_routing_scheduler() -> None:
     """Periodic background loop, spawned from the FastAPI lifespan."""
     while True:

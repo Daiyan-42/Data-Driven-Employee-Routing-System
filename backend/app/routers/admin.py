@@ -22,7 +22,7 @@ from app.models.route import (
     ZoneUpdate,
     ZonesListResponse,
 )
-from app.scheduler import run_pending_routing
+from app.scheduler import run_all_pending, run_pending_routing
 from app.services.employee_service import EmployeeService
 from app.services.route_service import RouteService
 from app.services.routing_service import RoutingService
@@ -85,6 +85,18 @@ def auto_run_routing(
     testing/troubleshooting. Safe to call repeatedly (idempotent).
     """
     return run_pending_routing(force=True)
+
+
+@router.post("/admin/routing/run-all")
+def run_all_routing(
+    _: TokenData = Depends(require_admin),
+):
+    """Route every pending request (any date, any shift) in a single call.
+
+    Picks up anything left over after manual edits/rejections, regardless of
+    which service date it belongs to. Safe to call repeatedly (idempotent).
+    """
+    return run_all_pending(force=True)
 
 
 @router.post("/admin/employees", response_model=EmployeeProfileResponse, status_code=201)
