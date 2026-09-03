@@ -78,6 +78,18 @@ class RoutingWriter:
         route_ids = [r["route_id"] for r in routes]
         deleted = {"routes": len(route_ids), "stops": 0, "passengers": 0}
 
+        # Unlink requests and put them back in play. Rejected requests are left
+        # alone — they were never routed and must not be resurrected as Pending.
+        for table in ("pickup_request", "dropoff_request"):
+            (
+                self.db.table(table)
+                .update({"route_id": None, "status": "Pending"})
+                .eq("service_date", service_date)
+                .neq("status", "Rejected")
+                .execute()
+            )
+            self._count()
+
         if route_ids:
             stop_ids: List[int] = []
             for chunk in _chunks(route_ids, FILTER_CHUNK):
@@ -102,21 +114,14 @@ class RoutingWriter:
             for chunk in _chunks(route_ids, FILTER_CHUNK):
                 self.db.table("route_assignment").delete().in_("route_id", list(chunk)).execute()
                 self._count()
+
+            # pickup_request.route_id and dropoff_request.route_id both reference
+            # route(route_id), and schema.sql has no ON DELETE CASCADE — the link
+            # is broken above, so the routes can go now. This only bites when
+            # re-solving an already-routed date, which the weekly auto-pass does.
             for chunk in _chunks(route_ids, FILTER_CHUNK):
                 self.db.table("route").delete().in_("route_id", list(chunk)).execute()
                 self._count()
-
-        # Unlink requests and put them back in play. Rejected requests are left
-        # alone — they were never routed and must not be resurrected as Pending.
-        for table in ("pickup_request", "dropoff_request"):
-            (
-                self.db.table(table)
-                .update({"route_id": None, "status": "Pending"})
-                .eq("service_date", service_date)
-                .neq("status", "Rejected")
-                .execute()
-            )
-            self._count()
 
         logger.info("cleared %s for %s", deleted, service_date)
         return deleted
