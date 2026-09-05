@@ -1,4 +1,5 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -40,10 +41,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow frontend dev server
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Allow frontend dev server; override at runtime via CORS_ORIGINS env var
+# (comma-separated list, e.g. "http://1.2.3.4:3000,https://example.com")
+_raw_origins = os.getenv("CORS_ORIGINS", "")
+_ALLOWED_ORIGINS: list[str] = (
+    [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    if _raw_origins.strip()
+    else [
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
@@ -52,7 +56,12 @@ app.add_middleware(
         "http://127.0.0.1:3001",
         "http://127.0.0.1:3002",
         "http://127.0.0.1:5173",
-    ],
+    ]
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
