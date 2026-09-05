@@ -6,12 +6,12 @@ on:
   pull_request:
     branches: [main]
 
-# Image names are derived at runtime from the repo owner so this workflow
-# works identically in the upstream org (Saon110) and any fork.
+# Production images always live on the upstream account. Forks still get a
+# Docker build check on PRs; only a push to Saon110/main publishes + deploys.
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/dders-backend
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/dders-frontend
+  BACKEND_IMAGE: ghcr.io/saon110/dders-backend
+  FRONTEND_IMAGE: ghcr.io/saon110/dders-frontend
 
 jobs:
   # ── CI: build-check on every push & PR ──────────────────────────────────────
@@ -45,7 +45,7 @@ jobs:
   deploy:
     name: Push & deploy to Azure VM
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.repository == 'Saon110/Data-Driven-Employee-Routing-System' && github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     permissions:

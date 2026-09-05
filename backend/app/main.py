@@ -34,11 +34,18 @@ async def lifespan(app: FastAPI):
             pass
 
 
+# Behind nginx, the browser talks to /api/* and the proxy strips that prefix.
+# FastAPI still serves /docs and /openapi.json on the app; root_path tells
+# Swagger UI to fetch /api/openapi.json instead of /openapi.json (which nginx
+# would treat as a SPA route and return index.html).
+_root_path = os.getenv("ROOT_PATH", "").rstrip("/")
+
 app = FastAPI(
     title="Employee Routing System — Backend",
     version="1.0.0",
     description="Admin manages drivers, vehicles and request approvals",
     lifespan=lifespan,
+    root_path=_root_path,
 )
 
 # Allow frontend dev server; override at runtime via CORS_ORIGINS env var
