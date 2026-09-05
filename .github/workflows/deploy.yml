@@ -6,13 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Image names are derived at runtime from the repo owner so this workflow
+# works identically in the upstream org (Saon110) and any fork.
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/daiyan-42/dders-backend
-  FRONTEND_IMAGE: ghcr.io/daiyan-42/dders-frontend
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/dders-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/dders-frontend
 
 jobs:
-  # ── CI: build-check on every push & PR ────────────────────────────────────
+  # ── CI: build-check on every push & PR ──────────────────────────────────────
   build:
     name: Build images (CI check)
     runs-on: ubuntu-latest
@@ -39,7 +41,7 @@ jobs:
           build-args: VITE_API_BASE_URL=/api
           tags: dders-frontend:ci
 
-  # ── CD: push images + deploy (main branch only) ───────────────────────────
+  # ── CD: push images + deploy (main branch only) ─────────────────────────────
   deploy:
     name: Push & deploy to Azure VM
     needs: build
@@ -48,7 +50,7 @@ jobs:
 
     permissions:
       contents: read
-      packages: write   # needed to push to GHCR
+      packages: write   # push to GHCR
 
     steps:
       - name: Checkout
@@ -87,7 +89,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Copy docker-compose.yml to VM
+      - name: Copy compose file to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.AZURE_VM_HOST }}
@@ -106,15 +108,12 @@ jobs:
             set -e
             cd /opt/dders
 
-            # Authenticate with GHCR so we can pull private images
+            # Log in so Docker can pull the (potentially private) GHCR packages
             echo "${{ secrets.GITHUB_TOKEN }}" | \
               docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Pull latest images and restart containers
             docker compose pull
             docker compose up -d --remove-orphans
-
-            # Free disk space
             docker image prune -f
 
-            echo "✅ Deployed $(date -u)"
+            echo "✅ Deployed at $(date -u) — sha ${{ github.sha }}"

@@ -102,8 +102,8 @@ Defined in `.github/workflows/deploy.yml`.
 ```bash
 cd /opt/dders
 docker login ghcr.io          # with GITHUB_TOKEN
-docker compose pull           # pull ghcr.io/daiyan-42/dders-backend:latest
-                              # and ghcr.io/daiyan-42/dders-frontend:latest
+docker compose pull           # pull ghcr.io/saon110/dders-backend:latest
+                              # and ghcr.io/saon110/dders-frontend:latest
 docker compose up -d --remove-orphans
 docker image prune -f         # clean up old layers
 ```
@@ -124,7 +124,7 @@ ssh azureuser@<VM_IP>
 cd /opt/dders
 
 # Pull images (log into GHCR with a personal access token if images are private)
-docker login ghcr.io -u Daiyan-42 -p <your-github-PAT>
+docker login ghcr.io -u Saon110 -p <your-github-PAT>
 
 docker compose pull
 docker compose up -d

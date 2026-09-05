@@ -1,18 +1,18 @@
 services:
 
   backend:
-    image: ghcr.io/daiyan-42/dders-backend:latest
+    # Image pushed to GHCR by the CI/CD workflow (Saon110 org).
+    image: ghcr.io/saon110/dders-backend:latest
     restart: unless-stopped
     env_file:
-      # On the VM, create /opt/dders/.env.production with the 3 secrets.
-      # See README-deploy.md for the format.
+      # On the VM, create /opt/dders/.env.production — see README-deploy.md.
       - .env.production
     environment:
-      ROUTING_ENGINE: lightweight       # no OSRM needed; haversine fallback
+      ROUTING_ENGINE: lightweight       # haversine fallback; no OSRM needed
       JWT_ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "480"
     expose:
-      - "8000"
+      - "8000"                          # internal only — nginx proxies /api/*
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=5)\""]
       interval: 30s
@@ -21,10 +21,11 @@ services:
       start_period: 20s
 
   frontend:
-    image: ghcr.io/daiyan-42/dders-frontend:latest
+    # Image pushed to GHCR by the CI/CD workflow (Saon110 org).
+    image: ghcr.io/saon110/dders-frontend:latest
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "80:80"                         # only public-facing port
     depends_on:
       backend:
         condition: service_healthy
