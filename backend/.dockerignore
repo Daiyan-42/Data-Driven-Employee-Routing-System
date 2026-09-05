@@ -1,0 +1,12 @@
+myenv
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+*.md
+.pytest_cache
+.mypy_cache
+cache
+capstone

@@ -1,18 +1,33 @@
+# One compose file for local builds and the Azure VM.
+#
+# Local (builds Dockerfiles, uses backend/.env):
+#   docker compose up --build -d
+#   open http://localhost   (or http://localhost:8080 if you set HTTP_PORT=8080)
+#
+# Azure VM (pulls ghcr.io/saon110 images, uses /opt/dders/.env.production):
+#   docker compose pull && docker compose up -d
+#
+# Only a push to Saon110/main publishes those images and deploys.
+
 services:
 
   backend:
-    # Image pushed to GHCR by the CI/CD workflow (Saon110 org).
     image: ghcr.io/saon110/dders-backend:latest
+    build:
+      context: ./backend
     restart: unless-stopped
     env_file:
-      # On the VM, create /opt/dders/.env.production — see README-deploy.md.
-      - .env.production
+      - path: .env.production
+        required: false
+      - path: backend/.env
+        required: false
     environment:
-      ROUTING_ENGINE: lightweight       # haversine fallback; no OSRM needed
+      ROUTING_ENGINE: lightweight
       JWT_ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+      ROOT_PATH: /api
     expose:
-      - "8000"                          # internal only — nginx proxies /api/*
+      - "8000"
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=5)\""]
       interval: 30s
@@ -21,11 +36,14 @@ services:
       start_period: 20s
 
   frontend:
-    # Image pushed to GHCR by the CI/CD workflow (Saon110 org).
     image: ghcr.io/saon110/dders-frontend:latest
+    build:
+      context: ./Frontend
+      args:
+        VITE_API_BASE_URL: /api
     restart: unless-stopped
     ports:
-      - "80:80"                         # only public-facing port
+      - "${HTTP_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_healthy
